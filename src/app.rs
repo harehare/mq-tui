@@ -376,7 +376,7 @@ impl App {
     }
 
     pub fn exec_query(&mut self) {
-        let mut engine = Engine::default();
+        let mut engine: Engine = Engine::default();
         engine.load_builtin_module();
         let start = Instant::now();
         let markdown_result = Markdown::from_markdown_str(&self.content);
