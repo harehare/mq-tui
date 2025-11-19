@@ -192,7 +192,7 @@ The tree view mode provides a visual representation of your Markdown document's 
 ## Related Projects
 
 - [mq](https://github.com/harehare/mq) - The underlying Markdown query processor
-- [mqv](https://github.com/harehare/mqv) - Markdown viewer with syntax highlighting
+- [mq-view](https://github.com/harehare/mq-view) - Markdown viewer with syntax highlighting
 - [mqlang.org](https://mqlang.org) - Documentation and language reference
 
 ## Contributing
