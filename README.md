@@ -1,6 +1,6 @@
-<h1 align="center">mqt - TUI for mq Markdown Processor</h1>
+<h1 align="center">mq-tui - TUI for mq Markdown Processor</h1>
 
-[![ci](https://github.com/harehare/mqt/actions/workflows/ci.yml/badge.svg)](https://github.com/harehare/mqt/actions/workflows/ci.yml)
+[![ci](https://github.com/harehare/mq-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/harehare/mq-tui/actions/workflows/ci.yml)
 
 <div align="center">
 
@@ -12,7 +12,7 @@ Interactive terminal interface for querying and manipulating Markdown content
 
 ## Overview
 
-`mqt` (mq-tui) is a powerful Text-based User Interface for the [mq](https://github.com/harehare/mq) Markdown processor. It provides an interactive terminal experience for querying, filtering, and exploring Markdown documents using the mq query language.
+`mq-tui` is a Text-based User Interface for the [mq](https://github.com/harehare/mq) Markdown processor. It provides an interactive terminal experience for querying, filtering, and exploring Markdown documents using the mq query language.
 
 ### Key Features
 
@@ -30,13 +30,13 @@ Interactive terminal interface for querying and manipulating Markdown content
 ### Using the Installation Script (Recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/harehare/mqt/main/bin/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/harehare/mq-tui/main/bin/install.sh | bash
 ```
 
 The installer will:
 - Download the latest release for your platform
 - Verify the binary with SHA256 checksum
-- Install to `~/.mqt/bin/`
+- Install to `~/.mq-tui/bin/`
 - Update your shell profile (bash, zsh, or fish)
 
 After installation, restart your terminal or run:
@@ -47,10 +47,10 @@ source ~/.bashrc  # or ~/.zshrc, or ~/.config/fish/config.fish
 ### From Source
 
 ```bash
-git clone https://github.com/harehare/mqt.git
-cd mqt
+git clone https://github.com/harehare/mq-tui.git
+cd mq-tui
 cargo build --release
-# Binary will be at target/release/mqt
+# Binary will be at target/release/mq-tui
 ```
 
 ### Supported Platforms
@@ -65,7 +65,7 @@ cargo build --release
 
 ```bash
 # Open a Markdown file
-mqt README.md
+mq-tui README.md
 ```
 
 ### Query Examples
@@ -187,7 +187,7 @@ The tree view mode provides a visual representation of your Markdown document's 
 
 ## Configuration
 
-`mqt` works out of the box with sensible defaults. The UI adapts to your terminal's color scheme and size.
+`mq-tui` works out of the box with sensible defaults. The UI adapts to your terminal's color scheme and size.
 
 ## Related Projects
 

@@ -145,8 +145,8 @@ fn draw_status_line(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_title_bar(frame: &mut Frame, app: &App, area: Rect) {
     let title = match app.filename() {
-        Some(filename) => format!("mqt - {}", filename),
-        None => "mqt".to_string(),
+        Some(filename) => format!("mq_tui - {}", filename),
+        None => "mq_tui".to_string(),
     };
 
     let mode_indicator = match app.mode() {
@@ -427,7 +427,7 @@ mod tests {
                 .iter()
                 .map(|c| c.symbol())
                 .join("")
-                .contains("mqt")
+                .contains("mq_tui")
         );
     }
 
@@ -552,7 +552,7 @@ mod tests {
                 .iter()
                 .map(|c| c.symbol())
                 .join("")
-                .contains("mqt")
+                .contains("mq_tui")
         );
     }
 

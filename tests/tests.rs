@@ -1,5 +1,5 @@
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-use mqt::{App, Mode};
+use mq_tui::{App, Mode};
 
 fn create_test_app() -> App {
     let content = r#"# Test Heading

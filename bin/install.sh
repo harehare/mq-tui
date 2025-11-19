@@ -2,10 +2,10 @@
 
 set -e
 
-# mqt installation script
+# mq-tui installation script
 
-readonly MQT_REPO="harehare/mqt"
-readonly MQT_INSTALL_DIR="$HOME/.mqt"
+readonly MQT_REPO="harehare/mq-tui"
+readonly MQT_INSTALL_DIR="$HOME/.mq"
 readonly MQT_BIN_DIR="$MQT_INSTALL_DIR/bin"
 
 
@@ -33,7 +33,7 @@ error() {
     exit 1
 }
 
-# Display the mqt logo
+# Display the mq-tui logo
 show_logo() {
     cat << 'EOF'
 
@@ -114,7 +114,7 @@ get_download_url() {
         target="${arch}-unknown-linux-gnu"
     fi
 
-    echo "https://github.com/$MQT_REPO/releases/download/$version/mqt-${target}${ext}"
+    echo "https://github.com/$MQT_REPO/releases/download/$version/mq-tui-${target}${ext}"
 }
 
 # Download checksums file
@@ -178,19 +178,19 @@ verify_checksum() {
     fi
 }
 
-# Download and install mqt
+# Download and install mq-tui
 install_mqt() {
     local version="$1"
     local os="$2"
     local arch="$3"
     local download_url
-    local binary_name="mqt"
+    local binary_name="mq-tui"
     local ext=""
     local target=""
 
     if [[ "$os" == "windows" ]]; then
         ext=".exe"
-        binary_name="mqt.exe"
+        binary_name="mq-tui.exe"
         target="${arch}-pc-windows-msvc"
     elif [[ "$os" == "darwin" ]]; then
         target="${arch}-apple-darwin"
@@ -200,7 +200,7 @@ install_mqt() {
 
     download_url=$(get_download_url "$version" "$os" "$arch")
 
-    log "Downloading mqt $version for $os/$arch..."
+    log "Downloading mq-tui $version for $os/$arch..."
     log "Download URL: $download_url"
 
     # Download checksums file
@@ -215,11 +215,11 @@ install_mqt() {
     temp_file=$(mktemp)
 
     if ! curl -L --progress-bar "$download_url" -o "$temp_file"; then
-        error "Failed to download mqt binary"
+        error "Failed to download mq-tui binary"
     fi
 
     # Verify checksum
-    local release_binary_name="mqt-${target}${ext}"
+    local release_binary_name="mq-tui-${target}${ext}"
     if [[ -n "$checksums_file" && -f "$checksums_file" ]]; then
         if ! verify_checksum "$temp_file" "$checksums_file" "$release_binary_name"; then
             rm -f "$checksums_file"
@@ -235,10 +235,10 @@ install_mqt() {
     mv "$temp_file" "$MQT_BIN_DIR/$binary_name"
     chmod +x "$MQT_BIN_DIR/$binary_name"
 
-    log "mqt installed successfully to $MQT_BIN_DIR/$binary_name"
+    log "mq-tui installed successfully to $MQT_BIN_DIR/$binary_name"
 }
 
-# Add mqt to PATH by updating shell profile
+# Add mq-tui to PATH by updating shell profile
 update_shell_profile() {
     local shell_profile=""
     local shell_name
@@ -265,6 +265,12 @@ update_shell_profile() {
             ;;
     esac
 
+    # Check if the directory is already in PATH
+    if echo "$PATH" | grep -q "$MQT_BIN_DIR"; then
+        log "$MQT_BIN_DIR is already in PATH"
+        return 0
+    fi
+
     if [[ -n "$shell_profile" ]]; then
         local path_export
         if [[ "$shell_name" == "fish" ]]; then
@@ -275,7 +281,7 @@ update_shell_profile() {
 
         if ! grep -q "$MQT_BIN_DIR" "$shell_profile" 2>/dev/null; then
             echo "" >> "$shell_profile"
-            echo "# Added by mqt installer" >> "$shell_profile"
+            echo "# Added by mq-tui installer" >> "$shell_profile"
             echo "$path_export" >> "$shell_profile"
             log "Added $MQT_BIN_DIR to PATH in $shell_profile"
         else
@@ -289,13 +295,13 @@ update_shell_profile() {
 
 # Verify installation
 verify_installation() {
-    # Check mqt installation
-    if [[ -x "$MQT_BIN_DIR/mqt" ]] || [[ -x "$MQT_BIN_DIR/mqt.exe" ]]; then
-        log "✓ mqt installation verified"
+    # Check mq-tui installation
+    if [[ -x "$MQT_BIN_DIR/mq-tui" ]] || [[ -x "$MQT_BIN_DIR/mq-tui.exe" ]]; then
+        log "✓ mq-tui installation verified"
         log "Installation verification successful!"
         return 0
     else
-        error "mqt installation verification failed"
+        error "mq-tui installation verification failed"
     fi
 }
 
@@ -303,7 +309,7 @@ verify_installation() {
 show_post_install() {
     echo ""
     echo -e "${PURPLE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BOLD}${GREEN}✨ mqt installed successfully! ✨${NC}"
+    echo -e "${BOLD}${GREEN}✨ mq-tui installed successfully! ✨${NC}"
     echo -e "${PURPLE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     echo -e "${BOLD}${CYAN}🚀 Getting Started:${NC}"
@@ -312,15 +318,15 @@ show_post_install() {
     echo -e "     ${CYAN}source ~/.bashrc${NC} ${BLUE}(or your shell's profile)${NC}"
     echo ""
     echo -e "  ${YELLOW}2.${NC} Verify the installation:"
-    echo -e "     ${CYAN}mqt --version${NC}"
+    echo -e "     ${CYAN}mq-tui --version${NC}"
     echo ""
     echo -e "  ${YELLOW}3.${NC} Get help:"
-    echo -e "     ${CYAN}mqt --help${NC}"
+    echo -e "     ${CYAN}mq-tui --help${NC}"
     echo ""
     echo -e "${BOLD}${CYAN}⚡ Quick Examples:${NC}"
-    echo -e "  ${GREEN}▶${NC} ${CYAN}mqt README.md                # Open Markdown file in TUI${NC}"
-    echo -e "  ${GREEN}▶${NC} ${CYAN}echo \"# Hello\" | mqt          # Pipe markdown content${NC}"
-    echo -e "  ${GREEN}▶${NC} ${CYAN}mqt file.md -q '.heading'    # Query Markdown elements${NC}"
+    echo -e "  ${GREEN}▶${NC} ${CYAN}mq-tui README.md                # Open Markdown file in TUI${NC}"
+    echo -e "  ${GREEN}▶${NC} ${CYAN}echo \"# Hello\" | mq-tui          # Pipe markdown content${NC}"
+    echo -e "  ${GREEN}▶${NC} ${CYAN}mq-tui file.md -q '.heading'    # Query Markdown elements${NC}"
     echo ""
     echo -e "${BOLD}${CYAN}📚 Learn More:${NC}"
     echo -e "  ${GREEN}▶${NC} Repository: ${BLUE}https://github.com/$MQT_REPO${NC}"
@@ -350,7 +356,7 @@ main() {
     version=$(get_latest_version)
     log "Latest version: $version"
 
-    # Install mqt
+    # Install mq-tui
     install_mqt "$version" "$os" "$arch"
 
     # Update shell profile
@@ -367,7 +373,7 @@ main() {
 while [[ $# -gt 0 ]]; do
     case $1 in
         --help|-h)
-            echo "mqt installation script"
+            echo "mq-tui installation script"
             echo ""
             echo "Usage: $0 [options]"
             echo ""
@@ -377,7 +383,7 @@ while [[ $# -gt 0 ]]; do
             exit 0
             ;;
         --version|-v)
-            echo "mqt installer v1.0.0"
+            echo "mq-tui installer v1.0.0"
             exit 0
             ;;
         *)

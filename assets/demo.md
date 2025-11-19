@@ -1,10 +1,10 @@
-# mqt Demo Document
+# mq-tui Demo Document
 
-Welcome to the mqt demonstration document. This file contains various Markdown elements to showcase mqt's querying capabilities.
+Welcome to the mq-tui demonstration document. This file contains various Markdown elements to showcase mq-tui's querying capabilities.
 
 ## Getting Started
 
-mqt is a powerful TUI for querying Markdown documents. Use the `:` key to enter query mode and start exploring.
+mq-tui is a powerful TUI for querying Markdown documents. Use the `:` key to enter query mode and start exploring.
 
 ### Basic Queries
 
@@ -67,7 +67,7 @@ fn main() {
 
 ### Task List
 
-- [x] Install mqt
+- [x] Install mq-tui
 - [x] Open demo document
 - [ ] Try query mode
 - [ ] Explore tree view
@@ -87,7 +87,7 @@ fn main() {
 
 ### External Links
 
-- [mqt GitHub Repository](https://github.com/harehare/mqt)
+- [mq-tui GitHub Repository](https://github.com/harehare/mq-tui)
 - [mq Markdown Processor](https://github.com/harehare/mq)
 - [mqlang.org Documentation](https://mqlang.org)
 - [Rust Programming Language](https://www.rust-lang.org)
@@ -100,39 +100,39 @@ See [Getting Started](#getting-started) for basic information.
 
 ### Logo Examples
 
-![mqt Logo](https://via.placeholder.com/150?text=mqt)
+![mq-tui Logo](https://via.placeholder.com/150?text=mq-tui)
 ![Sample Image](https://via.placeholder.com/200x100?text=Sample)
 
 ## Tables
 
 ### Feature Comparison
 
-| Feature           | mqt | Other Tools |
-| ----------------- | --- | ----------- |
-| Interactive Query | ✅  | ❌          |
-| Tree View         | ✅  | ⚠️          |
-| Vim Navigation    | ✅  | ❌          |
-| Clipboard Support | ✅  | ✅          |
-| Syntax Highlight  | ✅  | ✅          |
+| Feature           | mq-tui | Other Tools |
+| ----------------- | ------ | ----------- |
+| Interactive Query | ✅      | ❌           |
+| Tree View         | ✅      | ⚠️           |
+| Vim Navigation    | ✅      | ❌           |
+| Clipboard Support | ✅      | ✅           |
+| Syntax Highlight  | ✅      | ✅           |
 
 ### Keyboard Shortcuts
 
-| Key   | Action                   |
-| ----- | ------------------------ |
-| `q`   | Quit application         |
-| `:`   | Enter query mode         |
-| `t`   | Toggle tree view         |
-| `d`   | Toggle detail view       |
-| `y`   | Copy to clipboard        |
-| `?`   | Show help                |
-| `j/k` | Navigate up/down         |
+| Key   | Action             |
+| ----- | ------------------ |
+| `q`   | Quit application   |
+| `:`   | Enter query mode   |
+| `t`   | Toggle tree view   |
+| `d`   | Toggle detail view |
+| `y`   | Copy to clipboard  |
+| `?`   | Show help          |
+| `j/k` | Navigate up/down   |
 
 ## Blockquotes
 
 > "The best way to predict the future is to invent it."
 > - Alan Kay
 
-> **Note:** mqt supports real-time query execution as you type.
+> **Note:** mq-tui supports real-time query execution as you type.
 
 > **Tip:** Use the tree view mode to visualize your document structure.
 
@@ -160,7 +160,7 @@ Here are some sections separated by horizontal rules:
 
 ### Custom Filtering
 
-You can use complex filters with mqt:
+You can use complex filters with mq-tui:
 
 ```mq
 .h | select(.depth >= 2 and .depth <= 3)
@@ -183,19 +183,19 @@ Press `t` to see the document structure as a tree with color-coded elements:
 
 ## Conclusion
 
-This demo document covers the main Markdown elements that mqt can query and manipulate. Try different queries to explore the power of mqt!
+This demo document covers the main Markdown elements that mq-tui can query and manipulate. Try different queries to explore the power of mq-tui!
 
 ### Quick Start Commands
 
 ```bash
 # Open this demo
-mqt assets/demo.md
+mq-tui assets/demo.md
 
 # Open any Markdown file
-mqt README.md
+mq-tui README.md
 
 # Installation
-curl -fsSL https://raw.githubusercontent.com/harehare/mqt/main/bin/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/harehare/mq-tui/main/bin/install.sh | bash
 ```
 
 ### Next Steps
@@ -208,4 +208,4 @@ curl -fsSL https://raw.githubusercontent.com/harehare/mqt/main/bin/install.sh | 
 
 ---
 
-*Happy querying with mqt!*
+*Happy querying with mq-tui!*

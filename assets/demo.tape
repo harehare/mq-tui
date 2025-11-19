@@ -17,7 +17,7 @@ Type "clear"
 Enter
 Show
 
-Type `mqt demo.md`
+Type `mq-tui demo.md`
 Enter
 Sleep 1.5s
 

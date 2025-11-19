@@ -915,8 +915,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "mqt"
-version = "0.1.0"
+name = "mq-tui"
+version = "0.1.1"
 dependencies = [
  "arboard",
  "clap",

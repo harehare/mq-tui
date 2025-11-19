@@ -1,17 +1,17 @@
 use clap::Parser;
 use miette::{IntoDiagnostic, miette};
-use mqt::App;
+use mq_tui::App;
 use std::fs;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
-#[command(name = "mqt")]
+#[command(name = "mq_tui")]
 #[command(author = env!("CARGO_PKG_AUTHORS"))]
 #[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "TUI for mq, a jq-like Markdown processing tool", long_about = None)]
 #[command(after_help = "Examples:\n\n
     Open a Markdown file:\n
-    $ mqt README.md\n\n
+    $ mq_tui README.md\n\n
     Use with mq CLI:\n
     $ mq tui file.md")]
 struct Cli {
@@ -24,7 +24,7 @@ fn main() -> miette::Result<()> {
     let cli = Cli::parse();
 
     let file_path = cli.file_path.ok_or_else(|| {
-        miette!("No file path provided.\nUsage: mqt <FILE>\nFor more information, try '--help'")
+        miette!("No file path provided.\nUsage: mq_tui <FILE>\nFor more information, try '--help'")
     })?;
 
     // Read from file

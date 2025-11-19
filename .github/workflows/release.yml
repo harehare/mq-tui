@@ -35,13 +35,13 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
       - name: Rename artifact
         run: |
-          mv target/${{ matrix.target }}/release/mqt${{ matrix.ext }} target/${{ matrix.target }}/release/mqt-${{ matrix.asset_name}}${{ matrix.ext }}
+          mv target/${{ matrix.target }}/release/mq-tui${{ matrix.ext }} target/${{ matrix.target }}/release/mq-tui-${{ matrix.asset_name}}${{ matrix.ext }}
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mqt-${{ matrix.asset_name }}
+          name: mq-tui-${{ matrix.asset_name }}
           path: |
-            target/${{ matrix.target }}/release/mqt-${{ matrix.asset_name}}${{ matrix.ext }}
+            target/${{ matrix.target }}/release/mq-tui-${{ matrix.asset_name}}${{ matrix.ext }}
           if-no-files-found: error
           retention-days: 1
 
@@ -56,12 +56,12 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: mqt*
+          pattern: mq-tui*
           path: target
       - name: Generate checksums
         run: |
           cd target
-          for file in mqt*/*; do
+          for file in mq-tui*/*; do
             sha256sum "$file" >> checksums.txt
           done
           mkdir checksums
