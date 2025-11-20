@@ -1,6 +1,7 @@
 <h1 align="center">mq-tui - TUI for mq Markdown Processor</h1>
 
 [![ci](https://github.com/harehare/mq-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/harehare/mq-tui/actions/workflows/ci.yml)
+[![mq language](https://img.shields.io/badge/mq-language-orange.svg)](https://github.com/harehare/mq)
 
 <div align="center">
 
