@@ -1,5 +1,5 @@
 use arboard::Clipboard;
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use miette::IntoDiagnostic;
 use mq_lang::Engine;
 use mq_markdown::Markdown;
@@ -121,7 +121,10 @@ impl App {
 
     fn handle_normal_mode_event(&mut self, event: Event) -> miette::Result<()> {
         if let Event::Key(KeyEvent {
-            code, modifiers, ..
+            code,
+            modifiers,
+            kind: KeyEventKind::Press,
+            ..
         }) = event
         {
             match (code, modifiers) {
@@ -212,7 +215,10 @@ impl App {
 
     fn handle_query_mode_event(&mut self, event: Event) -> miette::Result<()> {
         if let Event::Key(KeyEvent {
-            code, modifiers, ..
+            code,
+            modifiers,
+            kind: KeyEventKind::Press,
+            ..
         }) = event
         {
             match (code, modifiers) {
@@ -314,7 +320,11 @@ impl App {
     }
 
     fn handle_help_mode_event(&mut self, event: Event) -> miette::Result<()> {
-        if let Event::Key(KeyEvent { .. }) = event {
+        if let Event::Key(KeyEvent {
+            kind: KeyEventKind::Press,
+            ..
+        }) = event
+        {
             self.mode = Mode::Normal;
         }
 
@@ -323,7 +333,10 @@ impl App {
 
     fn handle_tree_view_mode_event(&mut self, event: Event) -> miette::Result<()> {
         if let Event::Key(KeyEvent {
-            code, modifiers, ..
+            code,
+            modifiers,
+            kind: KeyEventKind::Press,
+            ..
         }) = event
         {
             match (code, modifiers) {
@@ -1069,5 +1082,266 @@ mod tests {
         app.handle_event(tree_toggle_event).unwrap();
         assert_eq!(app.mode(), Mode::TreeView);
         assert!(app.tree_view().is_some());
+    }
+
+    #[test]
+    fn test_normal_mode_ignores_release_events() {
+        let mut app = create_test_app();
+        let test_results = vec![
+            Node::from("result1"),
+            Node::from("result2"),
+            Node::from("result3"),
+        ];
+        app.set_results(test_results);
+        let initial_idx = app.selected_idx();
+
+        // Send a Release event for Down key
+        let release_event = Event::Key(KeyEvent {
+            code: KeyCode::Down,
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+        app.handle_event(release_event).unwrap();
+
+        // Index should not change because Release events are ignored
+        assert_eq!(app.selected_idx(), initial_idx);
+
+        // Verify Press event still works
+        let press_event = Event::Key(KeyEvent {
+            code: KeyCode::Down,
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+        app.handle_event(press_event).unwrap();
+        assert_eq!(app.selected_idx(), initial_idx + 1);
+    }
+
+    #[test]
+    fn test_normal_mode_ignores_repeat_events() {
+        let mut app = create_test_app();
+        app.mode = Mode::Normal;
+        let initial_mode = app.mode();
+
+        // Send a Repeat event for mode switch key
+        let repeat_event = Event::Key(KeyEvent {
+            code: KeyCode::Char(':'),
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Repeat,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+        app.handle_event(repeat_event).unwrap();
+
+        // Mode should not change because Repeat events are ignored
+        assert_eq!(app.mode(), initial_mode);
+    }
+
+    #[test]
+    fn test_query_mode_ignores_release_events() {
+        let mut app = create_test_app();
+        app.set_mode(Mode::Query);
+        app.set_query("test".to_string());
+        let initial_query = app.query().to_string();
+
+        // Send a Release event for backspace
+        let release_event = Event::Key(KeyEvent {
+            code: KeyCode::Backspace,
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+        app.handle_event(release_event).unwrap();
+
+        // Query should not change because Release events are ignored
+        assert_eq!(app.query(), initial_query);
+
+        // Verify Press event still works
+        let press_event = Event::Key(KeyEvent {
+            code: KeyCode::Backspace,
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+        app.handle_event(press_event).unwrap();
+        assert_eq!(app.query(), "tes");
+    }
+
+    #[test]
+    fn test_query_mode_char_input_ignores_release() {
+        let mut app = create_test_app();
+        app.set_mode(Mode::Query);
+        app.set_query("".to_string());
+
+        // Send Release event for character input
+        let release_event = Event::Key(KeyEvent {
+            code: KeyCode::Char('x'),
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+        app.handle_event(release_event).unwrap();
+
+        // Query should remain empty because Release events are ignored
+        assert_eq!(app.query(), "");
+
+        // Verify Press event adds the character
+        let press_event = Event::Key(KeyEvent {
+            code: KeyCode::Char('x'),
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+        app.handle_event(press_event).unwrap();
+        assert_eq!(app.query(), "x");
+    }
+
+    #[test]
+    fn test_help_mode_ignores_release_events() {
+        let mut app = create_test_app();
+        app.set_mode(Mode::Help);
+
+        // Send a Release event
+        let release_event = Event::Key(KeyEvent {
+            code: KeyCode::Char('x'),
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+        app.handle_event(release_event).unwrap();
+
+        // Mode should not change because Release events are ignored
+        assert_eq!(app.mode(), Mode::Help);
+
+        // Verify Press event exits help mode
+        let press_event = Event::Key(KeyEvent {
+            code: KeyCode::Char('x'),
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+        app.handle_event(press_event).unwrap();
+        assert_eq!(app.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn test_tree_view_mode_ignores_release_events() {
+        let mut app = create_test_app();
+        app.set_mode(Mode::TreeView);
+        app.init_tree_view();
+
+        // Send a Release event for navigation
+        let release_event = Event::Key(KeyEvent {
+            code: KeyCode::Down,
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+        app.handle_event(release_event).unwrap();
+
+        // Should still be in tree view mode
+        assert_eq!(app.mode(), Mode::TreeView);
+
+        // Send Release event for Escape (exit tree view)
+        let escape_release = Event::Key(KeyEvent {
+            code: KeyCode::Esc,
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+        app.handle_event(escape_release).unwrap();
+
+        // Mode should not change because Release events are ignored
+        assert_eq!(app.mode(), Mode::TreeView);
+
+        // Verify Press event exits tree view
+        let escape_press = Event::Key(KeyEvent {
+            code: KeyCode::Esc,
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+        app.handle_event(escape_press).unwrap();
+        assert_eq!(app.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn test_windows_double_input_scenario() {
+        // This test simulates the Windows environment where both Press and Release
+        // events are generated for a single key press (issue #1)
+        let mut app = create_test_app();
+        let test_results = vec![Node::from("result1"), Node::from("result2")];
+        app.set_results(test_results);
+        assert_eq!(app.selected_idx(), 0);
+
+        // Simulate Windows: Press event followed by Release event
+        let press_event = Event::Key(KeyEvent {
+            code: KeyCode::Down,
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+        app.handle_event(press_event).unwrap();
+        assert_eq!(app.selected_idx(), 1); // Should move to next item
+
+        let release_event = Event::Key(KeyEvent {
+            code: KeyCode::Down,
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+        app.handle_event(release_event).unwrap();
+        assert_eq!(app.selected_idx(), 1); // Should NOT move again
+
+        // Verify the fix: only one navigation occurred instead of two
+    }
+
+    #[test]
+    fn test_query_mode_windows_double_input_scenario() {
+        // Test query mode with Windows-style Press/Release events
+        let mut app = create_test_app();
+        app.set_mode(Mode::Query);
+
+        // Simulate typing 'j' with Press event
+        let press_j = Event::Key(KeyEvent {
+            code: KeyCode::Char('j'),
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+        app.handle_event(press_j).unwrap();
+        assert_eq!(app.query(), "j");
+
+        // Simulate Release event for 'j'
+        let release_j = Event::Key(KeyEvent {
+            code: KeyCode::Char('j'),
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+        app.handle_event(release_j).unwrap();
+        assert_eq!(app.query(), "j"); // Should still be "j", not "jj"
+
+        // Simulate typing 'k' with Press event
+        let press_k = Event::Key(KeyEvent {
+            code: KeyCode::Char('k'),
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+        app.handle_event(press_k).unwrap();
+        assert_eq!(app.query(), "jk");
+
+        // Simulate Release event for 'k'
+        let release_k = Event::Key(KeyEvent {
+            code: KeyCode::Char('k'),
+            modifiers: KeyModifiers::NONE,
+            kind: crossterm::event::KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+        app.handle_event(release_k).unwrap();
+        assert_eq!(app.query(), "jk"); // Should still be "jk", not "jkk"
+
+        // Verify the fix: query is "jk" not "jjkk"
     }
 }
