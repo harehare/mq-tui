@@ -33,7 +33,10 @@ Sleep 1.5s
 Type `.code`
 Sleep 1.5s
 
-Type `("python")`
+Backspace 5
+Sleep 1.5s
+
+Type `select(.code.lang == "python")`
 Sleep 1.5s
 
 Escape
