@@ -239,14 +239,14 @@ impl TreeView {
     }
 
     pub fn toggle_expand(&mut self) {
-        if let Some(item) = self.items.get(self.selected_index) {
-            if item.has_children {
-                let current_expanded = item.is_expanded;
-                self.expanded_items.insert(item.index, !current_expanded);
-                self.rebuild_items();
+        if let Some(item) = self.items.get(self.selected_index)
+            && item.has_children
+        {
+            let current_expanded = item.is_expanded;
+            self.expanded_items.insert(item.index, !current_expanded);
+            self.rebuild_items();
 
-                self.selected_index = self.selected_index.min(self.items.len().saturating_sub(1));
-            }
+            self.selected_index = self.selected_index.min(self.items.len().saturating_sub(1));
         }
     }
 
@@ -310,7 +310,10 @@ impl TreeView {
                     } else {
                         "  "
                     };
-                    (indent.clone(), format!("{}{}", expand_icon, tree_item.display_text))
+                    (
+                        indent.clone(),
+                        format!("{}{}", expand_icon, tree_item.display_text),
+                    )
                 };
 
                 let full_content = format!("{}{}", indent, content);
@@ -328,11 +331,7 @@ impl TreeView {
             .collect();
 
         let list = List::new(items)
-            .block(
-                Block::default()
-                    .title(title)
-                    .borders(Borders::ALL),
-            )
+            .block(Block::default().title(title).borders(Borders::ALL))
             .highlight_style(Style::default().add_modifier(Modifier::BOLD));
 
         let mut state = ListState::default();
