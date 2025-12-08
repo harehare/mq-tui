@@ -16,7 +16,14 @@ crossterm = "0.29.0"
 itertools = "0.14.0"
 log = "0.4.28"
 miette = {version = "7.6.0", features = ["fancy"]}
-mq-lang = {git = "https://github.com/harehare/mq.git", package = "mq-lang"}
-mq-markdown = {git = "https://github.com/harehare/mq.git", package = "mq-markdown"}
+mq-lang = "0.5.5"
+mq-markdown = "0.5.5"
 ratatui = "0.29.0"
 unicode-width = "0.2.0"
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+opt-level = "z"
+panic = "abort"
+strip = true

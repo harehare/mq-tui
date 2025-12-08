@@ -19,12 +19,11 @@ impl EventHandler {
                     .checked_sub(last_tick.elapsed())
                     .unwrap_or(Duration::from_secs(0));
 
-                if event::poll(timeout).unwrap() {
-                    if let Ok(event) = event::read() {
-                        if sender.send(event).is_err() {
-                            break;
-                        }
-                    }
+                if event::poll(timeout).unwrap()
+                    && let Ok(event) = event::read()
+                    && sender.send(event).is_err()
+                {
+                    break;
                 }
 
                 if last_tick.elapsed() >= tick_rate {

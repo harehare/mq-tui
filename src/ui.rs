@@ -35,19 +35,52 @@ pub fn draw_ui(frame: &mut Frame, app: &App) {
             }
         }
         _ => {
-            if app.show_detail() && !app.results().is_empty() {
-                let detail_chunks = Layout::default()
+            // Show sidebar if enabled
+            if app.show_tree_sidebar() && app.sidebar_tree_view().is_some() {
+                let main_chunks = Layout::default()
                     .direction(Direction::Horizontal)
                     .constraints([
-                        Constraint::Percentage(40), // Results list
-                        Constraint::Percentage(60), // Detail view
+                        Constraint::Percentage(20), // Sidebar
+                        Constraint::Percentage(80), // Main content
                     ])
                     .split(chunks[1]);
 
-                draw_results_list(frame, app, detail_chunks[0]);
-                draw_detail_view(frame, app, detail_chunks[1]);
+                // Draw sidebar
+                if let Some(sidebar) = app.sidebar_tree_view() {
+                    sidebar.render_with_title(frame, main_chunks[0], "Headers");
+                }
+
+                // Draw main content area (results and/or detail)
+                if app.show_detail() && !app.results().is_empty() {
+                    let detail_chunks = Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints([
+                            Constraint::Percentage(40), // Results list
+                            Constraint::Percentage(60), // Detail view
+                        ])
+                        .split(main_chunks[1]);
+
+                    draw_results_list(frame, app, detail_chunks[0]);
+                    draw_detail_view(frame, app, detail_chunks[1]);
+                } else {
+                    draw_results_list(frame, app, main_chunks[1]);
+                }
             } else {
-                draw_results_list(frame, app, chunks[1]);
+                // No sidebar - original layout
+                if app.show_detail() && !app.results().is_empty() {
+                    let detail_chunks = Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints([
+                            Constraint::Percentage(40), // Results list
+                            Constraint::Percentage(60), // Detail view
+                        ])
+                        .split(chunks[1]);
+
+                    draw_results_list(frame, app, detail_chunks[0]);
+                    draw_detail_view(frame, app, detail_chunks[1]);
+                } else {
+                    draw_results_list(frame, app, chunks[1]);
+                }
             }
         }
     }
@@ -144,18 +177,7 @@ fn draw_status_line(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_title_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let title = match app.filename() {
-        Some(filename) => format!("mq_tui - {}", filename),
-        None => "mq_tui".to_string(),
-    };
-
-    let mode_indicator = match app.mode() {
-        Mode::Normal => "NORMAL",
-        Mode::Query => "QUERY",
-        Mode::Help => "HELP",
-        Mode::TreeView => "TREE VIEW",
-    };
-
+    let title = app.filename().unwrap_or("None");
     let title_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded);
@@ -164,14 +186,14 @@ fn draw_title_bar(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(title, Style::default().fg(Color::Green).bold()),
         Span::raw(" | "),
         Span::styled(
-            mode_indicator,
+            app.mode().to_string(),
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" | "),
         Span::styled(
-            "Press 't' for tree view, '?' for help",
+            "Press 's' for sidebar, 't' for tree view, '?' for help",
             Style::default().fg(Color::Gray),
         ),
     ];
@@ -313,6 +335,10 @@ fn draw_help_screen(frame: &mut Frame) {
             Span::raw(" - Toggle tree view"),
         ]),
         Line::from(vec![
+            Span::styled("s", Style::default().fg(Color::Yellow)),
+            Span::raw(" - Toggle sidebar (headers)"),
+        ]),
+        Line::from(vec![
             Span::styled("↑/k", Style::default().fg(Color::Yellow)),
             Span::raw(" - Move up in tree"),
         ]),
@@ -421,13 +447,14 @@ mod tests {
         let backend = terminal.backend();
         let buffer = backend.buffer();
 
+        // Check for sidebar hint or other UI elements
         assert!(
             buffer
                 .content()
                 .iter()
                 .map(|c| c.symbol())
                 .join("")
-                .contains("mq_tui")
+                .contains("sidebar")
         );
     }
 
@@ -546,13 +573,14 @@ mod tests {
         let backend = terminal.backend();
         let buffer = backend.buffer();
 
+        // Check for the new sidebar hint in title bar
         assert!(
             buffer
                 .content()
                 .iter()
                 .map(|c| c.symbol())
                 .join("")
-                .contains("mq_tui")
+                .contains("sidebar")
         );
     }
 

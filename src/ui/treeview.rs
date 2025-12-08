@@ -16,6 +16,7 @@ pub struct TreeItem {
     pub is_expanded: bool,
     pub has_children: bool,
     pub index: usize,
+    pub is_all_documents: bool,
 }
 
 impl TreeItem {
@@ -30,6 +31,19 @@ impl TreeItem {
             is_expanded: false,
             has_children,
             index,
+            is_all_documents: false,
+        }
+    }
+
+    pub fn new_all_documents(index: usize) -> Self {
+        Self {
+            node: Node::Empty,
+            display_text: "📄 All Documents".to_string(),
+            depth: 0,
+            is_expanded: false,
+            has_children: false,
+            index,
+            is_all_documents: true,
         }
     }
 
@@ -41,7 +55,8 @@ impl TreeItem {
                     .iter()
                     .map(|n| n.value().trim().to_string())
                     .collect::<String>();
-                format!("H{} {}", h.depth, text)
+                let hashes = "#".repeat(h.depth as usize);
+                format!("{} {}", hashes, text)
             }
             Node::List(l) => {
                 let item_count = l.values.len();
@@ -170,10 +185,20 @@ impl TreeView {
     }
 
     pub fn rebuild_items(&mut self) {
+        self.rebuild_items_with_all_documents(false);
+    }
+
+    pub fn rebuild_items_with_all_documents(&mut self, include_all_documents: bool) {
         self.items.clear();
         let mut index = 0;
-        let nodes = self.original_nodes.clone();
 
+        // Add "All Documents" entry if requested
+        if include_all_documents {
+            self.items.push(TreeItem::new_all_documents(index));
+            index += 1;
+        }
+
+        let nodes = self.original_nodes.clone();
         for node in nodes {
             self.add_node_recursive(node, 0, &mut index);
         }
@@ -238,25 +263,59 @@ impl TreeView {
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect) {
+        self.render_with_title(frame, area, "Document Tree");
+    }
+
+    pub fn render_with_title(&self, frame: &mut Frame, area: Rect, title: &str) {
         let items: Vec<ListItem> = self
             .items
             .iter()
             .enumerate()
             .map(|(i, tree_item)| {
-                let indent = "  ".repeat(tree_item.depth);
-                let expand_icon = if tree_item.has_children {
-                    if tree_item.is_expanded {
-                        "▼ "
-                    } else {
-                        "▶ "
-                    }
+                // Handle "All Documents" entry
+                if tree_item.is_all_documents {
+                    let line = Line::from(vec![Span::styled(
+                        tree_item.display_text.clone(),
+                        if i == self.selected_index {
+                            Style::default().fg(Color::Black).bg(Color::White)
+                        } else {
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD)
+                        },
+                    )]);
+                    return ListItem::new(line);
+                }
+
+                // For headers, use depth-based indentation
+                let (indent, content) = if let Node::Heading(h) = &tree_item.node {
+                    let text = h
+                        .values
+                        .iter()
+                        .map(|n| n.value().trim().to_string())
+                        .collect::<String>();
+
+                    // Add indentation based on header depth (depth - 1 spaces)
+                    let indent = "  ".repeat((h.depth.saturating_sub(1)) as usize);
+                    let hashes = "#".repeat(h.depth as usize);
+                    (indent, format!("{} {}", hashes, text))
                 } else {
-                    "  "
+                    let indent = "  ".repeat(tree_item.depth);
+                    let expand_icon = if tree_item.has_children {
+                        if tree_item.is_expanded {
+                            "▼ "
+                        } else {
+                            "▶ "
+                        }
+                    } else {
+                        "  "
+                    };
+                    (indent.clone(), format!("{}{}", expand_icon, tree_item.display_text))
                 };
 
-                let content = format!("{}{}{}", indent, expand_icon, tree_item.display_text);
+                let full_content = format!("{}{}", indent, content);
                 let line = Line::from(vec![Span::styled(
-                    content,
+                    full_content,
                     if i == self.selected_index {
                         Style::default().fg(Color::Black).bg(Color::White)
                     } else {
@@ -271,7 +330,7 @@ impl TreeView {
         let list = List::new(items)
             .block(
                 Block::default()
-                    .title("Document Tree")
+                    .title(title)
                     .borders(Borders::ALL),
             )
             .highlight_style(Style::default().add_modifier(Modifier::BOLD));
@@ -332,7 +391,7 @@ mod tests {
         assert_eq!(item.depth, 0);
         assert_eq!(item.index, 0);
         assert!(item.has_children);
-        assert_eq!(item.display_text, "H1 Test Heading");
+        assert_eq!(item.display_text, "# Test Heading");
     }
 
     #[test]
@@ -547,7 +606,7 @@ mod tests {
 
         // Test heading
         let heading = create_test_heading();
-        assert_eq!(TreeItem::create_display_text(&heading), "H1 Test Heading");
+        assert_eq!(TreeItem::create_display_text(&heading), "# Test Heading");
 
         // Test text
         let text = create_test_text();

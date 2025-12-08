@@ -5,6 +5,7 @@ use mq_lang::Engine;
 use mq_markdown::Markdown;
 use ratatui::prelude::*;
 use std::{
+    fmt::Display,
     io::Stdout,
     time::{Duration, Instant},
 };
@@ -21,6 +22,17 @@ pub enum Mode {
     Query,
     Help,
     TreeView,
+}
+
+impl Display for Mode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Mode::Normal => write!(f, "NORMAL"),
+            Mode::Query => write!(f, "QUERY"),
+            Mode::Help => write!(f, "HELP"),
+            Mode::TreeView => write!(f, "TREE VIEW"),
+        }
+    }
 }
 
 pub struct App {
@@ -54,12 +66,18 @@ pub struct App {
     filename: Option<String>,
     /// Tree view component
     tree_view: Option<TreeView>,
+    /// Show tree sidebar in Normal mode
+    show_tree_sidebar: bool,
+    /// Sidebar tree view (headers only)
+    sidebar_tree_view: Option<TreeView>,
+    /// All parsed markdown nodes (for section extraction)
+    all_nodes: Vec<mq_markdown::Node>,
 }
 
 impl App {
     pub fn new(content: String) -> Self {
-        Self {
-            content,
+        let mut app = Self {
+            content: content.clone(),
             query: String::new(),
             results: Vec::new(),
             selected_idx: 0,
@@ -74,7 +92,12 @@ impl App {
             cursor_position: 0,
             filename: None,
             tree_view: None,
-        }
+            show_tree_sidebar: false,
+            sidebar_tree_view: None,
+            all_nodes: Vec::new(),
+        };
+        app.init_sidebar_tree_view();
+        app
     }
 
     pub fn with_file(content: String, filename: String) -> Self {
@@ -150,20 +173,43 @@ impl App {
                     self.mode = Mode::TreeView;
                     self.init_tree_view();
                 }
-                // Navigate results
+                // Toggle tree sidebar
+                (KeyCode::Char('s'), _) => {
+                    self.toggle_tree_sidebar();
+                    // Update selection when sidebar is shown
+                    if self.show_tree_sidebar {
+                        self.update_sidebar_selection();
+                    }
+                }
+                // Navigate results or sidebar
                 (KeyCode::Down, _) | (KeyCode::Char('j'), _) => {
-                    if !self.results.is_empty() {
+                    if self.show_tree_sidebar && self.sidebar_tree_view.is_some() {
+                        if let Some(sidebar) = &mut self.sidebar_tree_view {
+                            sidebar.move_down();
+                        }
+                        self.update_sidebar_selection();
+                    } else if !self.results.is_empty() {
                         self.selected_idx = (self.selected_idx + 1) % self.results.len();
                     }
                 }
                 (KeyCode::Up, _) | (KeyCode::Char('k'), _) => {
-                    if !self.results.is_empty() {
+                    if self.show_tree_sidebar && self.sidebar_tree_view.is_some() {
+                        if let Some(sidebar) = &mut self.sidebar_tree_view {
+                            sidebar.move_up();
+                        }
+                        self.update_sidebar_selection();
+                    } else if !self.results.is_empty() {
                         self.selected_idx = if self.selected_idx > 0 {
                             self.selected_idx - 1
                         } else {
                             self.results.len() - 1
                         };
                     }
+                }
+                // Select header in sidebar (Enter key - content already updated by navigation)
+                (KeyCode::Enter, _) => {
+                    // Content is already updated by update_sidebar_selection()
+                    // Enter key can be used for future actions if needed
                 }
                 (KeyCode::PageDown, _) => {
                     if !self.results.is_empty() {
@@ -388,6 +434,92 @@ impl App {
         }
     }
 
+    /// Update results based on current sidebar selection
+    fn update_sidebar_selection(&mut self) {
+        if !self.show_tree_sidebar {
+            return;
+        }
+
+        if let Some(sidebar) = &self.sidebar_tree_view {
+            let selected_item = sidebar.items().get(sidebar.selected_index());
+
+            if let Some(item) = selected_item {
+                if item.is_all_documents {
+                    self.query.clear();
+                    self.cursor_position = 0;
+                    self.exec_query();
+                } else if let Some(selected_node) = sidebar.get_selected_node()
+                    && let mq_markdown::Node::Heading(heading) = selected_node
+                {
+                    let section_content = self.extract_section_content(heading);
+                    self.results = section_content;
+                    self.selected_idx = 0;
+                    self.cursor_position = self.query.len();
+                }
+            }
+        }
+    }
+
+    /// Extract section content from heading to the next same-level heading
+    fn extract_section_content(&self, heading: &mq_markdown::Heading) -> Vec<mq_markdown::Node> {
+        let mut section_nodes = Vec::new();
+        let mut found_heading = false;
+        let target_depth = heading.depth;
+
+        for node in &self.all_nodes {
+            if !found_heading {
+                // Check if this is our target heading
+                if let mq_markdown::Node::Heading(h) = node
+                    && h.depth == heading.depth
+                {
+                    let h_text: String = h.values.iter().map(|n| n.value()).collect();
+                    let target_text: String = heading.values.iter().map(|n| n.value()).collect();
+                    if h_text == target_text {
+                        found_heading = true;
+                        section_nodes.push(node.clone());
+                    }
+                }
+            } else {
+                // After finding the heading, collect nodes until next same-level heading
+                if let mq_markdown::Node::Heading(h) = node
+                    && h.depth <= target_depth
+                {
+                    // Found next same-level or higher-level heading, stop
+                    break;
+                }
+                section_nodes.push(node.clone());
+            }
+        }
+
+        section_nodes
+    }
+
+    fn init_sidebar_tree_view(&mut self) {
+        let markdown_result = Markdown::from_markdown_str(&self.content);
+        match markdown_result {
+            Ok(markdown) => {
+                // Store all nodes for section extraction
+                self.all_nodes = markdown.nodes.clone();
+
+                // Extract only heading nodes for the sidebar
+                let headers: Vec<mq_markdown::Node> = markdown
+                    .nodes
+                    .into_iter()
+                    .filter(|node| matches!(node, mq_markdown::Node::Heading(_)))
+                    .collect();
+
+                if !headers.is_empty() {
+                    let mut tree_view = TreeView::new(headers);
+                    tree_view.rebuild_items_with_all_documents(true);
+                    self.sidebar_tree_view = Some(tree_view);
+                }
+            }
+            Err(_) => {
+                // Silently fail for sidebar initialization
+            }
+        }
+    }
+
     pub fn exec_query(&mut self) {
         let mut engine: Engine = Engine::default();
         engine.load_builtin_module();
@@ -525,6 +657,26 @@ impl App {
     /// Get the tree view, if available
     pub fn tree_view(&self) -> Option<&TreeView> {
         self.tree_view.as_ref()
+    }
+
+    /// Check if tree sidebar is shown
+    pub fn show_tree_sidebar(&self) -> bool {
+        self.show_tree_sidebar
+    }
+
+    /// Get the sidebar tree view, if available
+    pub fn sidebar_tree_view(&self) -> Option<&TreeView> {
+        self.sidebar_tree_view.as_ref()
+    }
+
+    /// Get mutable reference to sidebar tree view
+    pub fn sidebar_tree_view_mut(&mut self) -> Option<&mut TreeView> {
+        self.sidebar_tree_view.as_mut()
+    }
+
+    /// Toggle tree sidebar visibility
+    pub fn toggle_tree_sidebar(&mut self) {
+        self.show_tree_sidebar = !self.show_tree_sidebar;
     }
 }
 #[cfg(test)]
