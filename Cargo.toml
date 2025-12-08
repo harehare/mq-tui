@@ -28,3 +28,7 @@ lto = "fat"
 opt-level = "z"
 panic = "abort"
 strip = true
+
+[package.metadata.binstall]
+pkg-fmt = "bin"
+pkg-url = "{ repo }/releases/download/v{ version }/mq-tui-{ target }{ binary-ext }"

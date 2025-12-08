@@ -32,6 +32,10 @@ Interactive terminal interface for querying and manipulating Markdown content
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/harehare/mq-tui/main/bin/install.sh | bash
+# Install from crates.io
+cargo install mq-tui
+# Install using binstall
+cargo binstall mq-tui@0.1.3
 ```
 
 The installer will:
