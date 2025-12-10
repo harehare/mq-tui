@@ -72,6 +72,10 @@ pub struct App {
     sidebar_tree_view: Option<TreeView>,
     /// All parsed markdown nodes (for section extraction)
     all_nodes: Vec<mq_markdown::Node>,
+    /// Whether a query execution is pending (for debouncing)
+    query_pending: bool,
+    /// Debounce duration for query execution
+    debounce_duration: Duration,
 }
 
 impl App {
@@ -95,6 +99,8 @@ impl App {
             show_tree_sidebar: false,
             sidebar_tree_view: None,
             all_nodes: Vec::new(),
+            query_pending: false,
+            debounce_duration: Duration::from_millis(300),
         };
         app.init_sidebar_tree_view();
         app
@@ -117,6 +123,11 @@ impl App {
 
             if let Some(event) = events.next()? {
                 self.handle_event(event)?;
+            }
+
+            // Check if we should execute a pending query (debounce)
+            if self.query_pending && self.last_exec.elapsed() >= self.debounce_duration {
+                self.exec_query();
             }
         }
 
@@ -285,6 +296,7 @@ impl App {
                         }
                     }
                     self.history_position = None;
+                    self.query_pending = false;
                     self.exec_query();
                 }
                 // Edit query
@@ -292,21 +304,21 @@ impl App {
                     self.query.insert(self.cursor_position, c);
                     self.cursor_position += 1;
                     self.last_exec = Instant::now();
-                    self.exec_query();
+                    self.query_pending = true;
                 }
                 (KeyCode::Backspace, _) => {
                     if self.cursor_position > 0 {
                         self.query.remove(self.cursor_position - 1);
                         self.cursor_position -= 1;
                         self.last_exec = Instant::now();
-                        self.exec_query();
+                        self.query_pending = true;
                     }
                 }
                 (KeyCode::Delete, _) => {
                     if self.cursor_position < self.query.len() {
                         self.query.remove(self.cursor_position);
                         self.last_exec = Instant::now();
-                        self.exec_query();
+                        self.query_pending = true;
                     }
                 }
                 // Move cursor
@@ -521,6 +533,7 @@ impl App {
     }
 
     pub fn exec_query(&mut self) {
+        self.query_pending = false;
         let mut engine: Engine = Engine::default();
         engine.load_builtin_module();
         let start = Instant::now();
