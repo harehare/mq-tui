@@ -140,7 +140,15 @@ fn draw_results_list(frame: &mut Frame, app: &App, area: Rect) {
         .lines()
         .enumerate()
         .map(|(i, value)| {
-            let content = Line::from(value.to_string());
+            let content = if is_markdown_header(value) {
+                // Apply header highlighting
+                Line::from(Span::styled(
+                    value.to_string(),
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                ))
+            } else {
+                Line::from(value.to_string())
+            };
 
             ListItem::new(content).style(if i == app.selected_idx() {
                 Style::default().fg(Color::Black).bg(Color::White)
@@ -158,6 +166,12 @@ fn draw_results_list(frame: &mut Frame, app: &App, area: Rect) {
     state.select(Some(app.selected_idx()));
 
     frame.render_stateful_widget(list, area, &mut state);
+}
+
+/// Check if a line is a markdown header (starts with #)
+fn is_markdown_header(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with('#') && trimmed.chars().nth(1).map_or(false, |c| c == ' ' || c == '#')
 }
 
 /// Draw the status line at the bottom
@@ -773,5 +787,25 @@ mod tests {
             .map(|c| c.symbol())
             .join("");
         assert!(content.contains("TREE VIEW"));
+    }
+
+    #[test]
+    fn test_is_markdown_header() {
+        // Valid headers
+        assert!(is_markdown_header("# Header 1"));
+        assert!(is_markdown_header("## Header 2"));
+        assert!(is_markdown_header("### Header 3"));
+        assert!(is_markdown_header("#### Header 4"));
+        assert!(is_markdown_header("##### Header 5"));
+        assert!(is_markdown_header("###### Header 6"));
+        assert!(is_markdown_header("  # Indented header"));
+        assert!(is_markdown_header("\t## Tabbed header"));
+
+        // Invalid headers
+        assert!(!is_markdown_header("#NoSpace"));
+        assert!(!is_markdown_header("No header here"));
+        assert!(!is_markdown_header(""));
+        assert!(!is_markdown_header("   "));
+        assert!(!is_markdown_header("Regular text # with hash"));
     }
 }
