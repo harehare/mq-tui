@@ -144,7 +144,9 @@ fn draw_results_list(frame: &mut Frame, app: &App, area: Rect) {
                 // Apply header highlighting
                 Line::from(Span::styled(
                     value.to_string(),
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
                 ))
             } else {
                 Line::from(value.to_string())
@@ -171,7 +173,7 @@ fn draw_results_list(frame: &mut Frame, app: &App, area: Rect) {
 /// Check if a line is a markdown header (starts with #)
 fn is_markdown_header(line: &str) -> bool {
     let trimmed = line.trim_start();
-    trimmed.starts_with('#') && trimmed.chars().nth(1).map_or(false, |c| c == ' ' || c == '#')
+    trimmed.starts_with('#') && trimmed.chars().nth(1).is_some_and(|c| c == ' ' || c == '#')
 }
 
 /// Draw the status line at the bottom

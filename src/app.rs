@@ -464,6 +464,11 @@ impl App {
                     && let mq_markdown::Node::Heading(heading) = selected_node
                 {
                     let section_content = self.extract_section_content(heading);
+                    self.query = format!(
+                        r#"import "section" | nodes | section::split({}) | section::title_contains("{}") | section::collect()"#,
+                        heading.depth,
+                        selected_node.value()
+                    );
                     self.results = section_content;
                     self.selected_idx = 0;
                     self.cursor_position = self.query.len();
