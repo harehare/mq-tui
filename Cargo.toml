@@ -19,7 +19,7 @@ log = "0.4.29"
 miette = {version = "7.6.0", features = ["fancy"]}
 mq-lang = "0.5.8"
 mq-markdown = "0.5.8"
-ratatui = "0.29.0"
+ratatui = "0.30.0"
 unicode-width = "0.2.0"
 
 [profile.release]
