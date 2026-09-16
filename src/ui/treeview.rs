@@ -8,6 +8,8 @@ use ratatui::{
 };
 use std::collections::HashMap;
 
+use crate::theme::Theme;
+
 #[derive(Debug, Clone)]
 pub struct TreeItem {
     pub node: Node,
@@ -172,6 +174,9 @@ pub struct TreeView {
     selected_index: usize,
     expanded_items: HashMap<usize, bool>,
     original_nodes: Vec<Node>,
+    /// Nodes to flag as matching the currently-typed query, so the tree can
+    /// highlight them live (jid-style) while the user composes a query.
+    matched_nodes: Vec<Node>,
 }
 
 impl TreeView {
@@ -181,10 +186,31 @@ impl TreeView {
             selected_index: 0,
             expanded_items: HashMap::new(),
             original_nodes: nodes.clone(),
+            matched_nodes: Vec::new(),
         };
 
         tree.rebuild_items();
         tree
+    }
+
+    /// Mark `nodes` as matching the live query, for highlighting in the tree.
+    pub fn set_matched_nodes(&mut self, nodes: Vec<Node>) {
+        self.matched_nodes = nodes;
+    }
+
+    /// Clear any live-query match highlighting.
+    pub fn clear_matched_nodes(&mut self) {
+        self.matched_nodes.clear();
+    }
+
+    /// Index of the first visible item whose node matches the live query.
+    pub fn first_matched_index(&self) -> Option<usize> {
+        if self.matched_nodes.is_empty() {
+            return None;
+        }
+        self.items
+            .iter()
+            .position(|item| !item.is_all_documents && self.matched_nodes.contains(&item.node))
     }
 
     pub fn rebuild_items(&mut self) {
@@ -350,11 +376,11 @@ impl TreeView {
         }
     }
 
-    pub fn render(&self, frame: &mut Frame, area: Rect) {
-        self.render_with_title(frame, area, "Document Tree");
+    pub fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        self.render_with_title(frame, area, "Document Tree", theme);
     }
 
-    pub fn render_with_title(&self, frame: &mut Frame, area: Rect, title: &str) {
+    pub fn render_with_title(&self, frame: &mut Frame, area: Rect, title: &str, theme: &Theme) {
         let wrap_width = area.width.saturating_sub(2).max(1) as usize;
         let items: Vec<ListItem> = self
             .items
@@ -366,10 +392,12 @@ impl TreeView {
                     let line = Line::from(vec![Span::styled(
                         tree_item.display_text.clone(),
                         if i == self.selected_index {
-                            Style::default().fg(Color::Black).bg(Color::White)
+                            Style::default()
+                                .fg(theme.selection_fg)
+                                .bg(theme.selection_bg)
                         } else {
                             Style::default()
-                                .fg(Color::Cyan)
+                                .fg(theme.header)
                                 .add_modifier(Modifier::BOLD)
                         },
                     )]);
@@ -406,8 +434,17 @@ impl TreeView {
                 };
 
                 let full_content = format!("{}{}", indent, content);
+                let is_match =
+                    !self.matched_nodes.is_empty() && self.matched_nodes.contains(&tree_item.node);
                 let style = if i == self.selected_index {
-                    Style::default().fg(Color::Black).bg(Color::White)
+                    Style::default()
+                        .fg(theme.selection_fg)
+                        .bg(theme.selection_bg)
+                } else if is_match {
+                    Style::default()
+                        .fg(theme.match_fg)
+                        .bg(theme.match_bg)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Self::get_node_style(&tree_item.node)
                 };
@@ -490,6 +527,21 @@ mod tests {
 
         assert_eq!(tree_view.items.len(), 2);
         assert_eq!(tree_view.selected_index, 0);
+    }
+
+    #[test]
+    fn test_matched_nodes_report_first_match_and_clear() {
+        let heading = create_test_heading();
+        let text = create_test_text();
+        let mut tree_view = TreeView::new(vec![heading.clone(), text]);
+
+        assert_eq!(tree_view.first_matched_index(), None);
+
+        tree_view.set_matched_nodes(vec![heading]);
+        assert_eq!(tree_view.first_matched_index(), Some(0));
+
+        tree_view.clear_matched_nodes();
+        assert_eq!(tree_view.first_matched_index(), None);
     }
 
     #[test]
@@ -1189,7 +1241,7 @@ mod tests {
         // Test rendering
         let result = terminal.draw(|frame| {
             let area = Rect::new(0, 0, 80, 10);
-            tree_view.render(frame, area);
+            tree_view.render(frame, area, &Theme::dark());
         });
 
         assert!(result.is_ok());
@@ -1229,7 +1281,7 @@ mod tests {
         // Test rendering with expanded items
         let result = terminal.draw(|frame| {
             let area = Rect::new(0, 0, 80, 10);
-            tree_view.render(frame, area);
+            tree_view.render(frame, area, &Theme::dark());
         });
 
         assert!(result.is_ok());

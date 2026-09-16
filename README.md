@@ -20,7 +20,7 @@ Interactive terminal interface for querying and manipulating Markdown content
 ## Key Features
 
 - 🔍 **Interactive Query Mode** - Real-time Markdown querying with instant results
-- 🌳 **Tree View** - Visual exploration of Markdown document structure
+- 🌳 **Tree View** - Visual exploration of Markdown document structure, with live match highlighting while you type a query (jid-inspired)
 - 👀 **Rendered Preview** - View Markdown rendered close to its final look, right in the terminal
 - 🪟 **Split Preview** - Show raw source side-by-side with the rendered preview
 - 📺 **Watch Mode** - Automatically reload files when they change on disk
@@ -34,7 +34,7 @@ Interactive terminal interface for querying and manipulating Markdown content
 - 🕹️ **Command Palette** - Fuzzy-searchable list of app actions (`Ctrl+K`)
 - 🌗 **Themes** - Dark (default) and light color themes for different terminal backgrounds
 - 💡 **Key-Hint Bar** - Persistent, mode-specific key hints folded into the status line (toggleable)
-- ✨ **Inline Completion** - Ghost-text suggestion for the top query completion as you type
+- ✨ **Inline Completion** - Ghost-text suggestion for the top query completion as you type, plus a candidate popup that bolds the part of each suggestion you've already typed
 
 ## Installation
 
@@ -115,9 +115,11 @@ Press `t` to display the Markdown document structure as an expandable tree, show
 
 The tree's title bar shows a breadcrumb trail (e.g. `# Intro › List › Text: ...`) for the selected node's ancestors, so it's easy to tell where you are in a deeply nested document.
 
+Press `:` from inside the tree to type a query without leaving it: as you type, nodes selected by the query are highlighted live in the tree and the selection jumps to the first match, so you can see what a selector like `.h` or `.link` matches before pressing `Enter`.
+
 ### Rendered Preview
 
-Press `p` to switch to a rendered preview of the active document - headings, bold/italic text, lists, blockquotes, code blocks, tables, and links are styled to look close to their final rendered form instead of raw Markdown syntax. Use `↑`/`k`, `↓`/`j`, `PageUp`/`PageDown`, or `g`/`G` to scroll, and press `p` or `Esc` to return to normal mode. Press `s` while in preview mode to split the view and show the raw Markdown source side-by-side with the rendered output, scrolling in sync.
+Press `p` to switch to a rendered preview of the active document - headings, bold/italic text, lists, blockquotes, code blocks, tables, and links are styled to look close to their final rendered form instead of raw Markdown syntax, using the same color palette as the active theme. Use `↑`/`k`, `↓`/`j`, `PageUp`/`PageDown`, or `g`/`G` to scroll, and press `p` or `Esc` to return to normal mode. Press `s` while in preview mode to split the view and show the raw Markdown source side-by-side with the rendered output, scrolling in sync. Press `:` to type a query without leaving the preview.
 
 ### Detail View
 
@@ -243,6 +245,7 @@ Press `?` or `F1` at any time in the app for this same list, in context.
 | `↑` / `k`         | Move up in tree                            |
 | `↓` / `j`         | Move down in tree                          |
 | `Enter` / `Space` | Expand/collapse node                       |
+| `:`               | Query without leaving the tree (live-highlights matches) |
 | `/`               | Incremental search within the tree         |
 | `n` / `N`         | Repeat last search forward/backward        |
 | `←` / `→`         | Switch tabs (when multiple files are open) |
@@ -271,6 +274,7 @@ Press `?` or `F1` at any time in the app for this same list, in context.
 | `G`         | Jump to bottom                             |
 | `s`         | Toggle split with raw source               |
 | `<` / `>`   | Resize the source/preview split (when `s` is on) |
+| `:`         | Query without leaving the preview          |
 | `←` / `→`   | Switch tabs (when multiple files are open) |
 | `Esc` / `p` | Exit preview                               |
 
