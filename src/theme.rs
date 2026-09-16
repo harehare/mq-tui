@@ -23,6 +23,8 @@ pub struct Theme {
     pub comment: Color,
     pub match_fg: Color,
     pub match_bg: Color,
+    pub code_fg: Color,
+    pub code_bg: Color,
 }
 
 impl Theme {
@@ -50,6 +52,8 @@ impl Theme {
             comment: Color::DarkGray,
             match_fg: Color::Black,
             match_bg: Color::Yellow,
+            code_fg: Color::White,
+            code_bg: Color::Rgb(40, 40, 40),
         }
     }
 
@@ -70,6 +74,8 @@ impl Theme {
             comment: Color::DarkGray,
             match_fg: Color::Black,
             match_bg: Color::Rgb(255, 210, 0),
+            code_fg: Color::Black,
+            code_bg: Color::Rgb(225, 225, 225),
         }
     }
 }

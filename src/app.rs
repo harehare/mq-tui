@@ -336,6 +336,10 @@ pub struct App {
     search_cursor: usize,
     /// Mode to return to when leaving Mode::Search (Normal or TreeView)
     search_return_mode: Mode,
+    /// Mode to return to when leaving Mode::Query (Normal, TreeView, or
+    /// Preview) - lets the user type a query while watching the tree/preview
+    /// update live instead of always dropping back to the results list.
+    query_return_mode: Mode,
     /// Selected index (in the active document's results, or the tree view)
     /// recorded when entering Mode::Search, so Esc can restore it
     search_origin_idx: usize,
@@ -435,6 +439,7 @@ impl App {
             search_query: String::new(),
             search_cursor: 0,
             search_return_mode: Mode::Normal,
+            query_return_mode: Mode::Normal,
             search_origin_idx: 0,
             search_origin_doc: 0,
             last_search: None,
@@ -621,6 +626,7 @@ impl App {
                 }
                 // Enter query mode
                 (KeyCode::Char(':'), _) => {
+                    self.query_return_mode = Mode::Normal;
                     self.mode = Mode::Query;
                     self.cursor_position = self.query.len();
                 }
@@ -819,12 +825,12 @@ impl App {
             match (code, modifiers) {
                 // Exit query mode on Escape
                 (KeyCode::Esc, _) => {
-                    self.mode = Mode::Normal;
+                    self.mode = self.query_return_mode;
                     self.history_position = None;
                 }
                 // Execute query on Enter
                 (KeyCode::Enter, _) => {
-                    self.mode = Mode::Normal;
+                    self.mode = self.query_return_mode;
                     if !self.query.is_empty() {
                         // Add query to history if it's not a duplicate
                         if self.query_history.is_empty()
@@ -1161,6 +1167,13 @@ impl App {
                 (KeyCode::Char('N'), _) if self.last_search.is_some() => {
                     self.repeat_search(false);
                 }
+                // Enter query mode without leaving the tree: matching nodes
+                // highlight live in the tree as the query is typed.
+                (KeyCode::Char(':'), _) => {
+                    self.query_return_mode = Mode::TreeView;
+                    self.mode = Mode::Query;
+                    self.cursor_position = self.query.len();
+                }
                 _ => {}
             }
         }
@@ -1350,6 +1363,12 @@ impl App {
                 (KeyCode::Char('>'), _) if self.preview_split => {
                     self.adjust_preview_split(5);
                 }
+                // Enter query mode without leaving the preview
+                (KeyCode::Char(':'), _) => {
+                    self.query_return_mode = Mode::Preview;
+                    self.mode = Mode::Query;
+                    self.cursor_position = self.query.len();
+                }
                 _ => {}
             }
             self.clamp_preview_scroll();
@@ -1441,7 +1460,7 @@ impl App {
     }
 
     fn preview_total_lines(&self) -> usize {
-        preview::render_preview(&self.active_doc().content).len()
+        preview::render_preview(&self.active_doc().content, &self.theme()).len()
     }
 
     fn clamp_preview_scroll(&mut self) {
@@ -1559,8 +1578,32 @@ impl App {
             }
         }
 
+        self.update_tree_view_matches();
+
         self.last_exec_time = start.elapsed();
         self.last_exec = Instant::now();
+    }
+
+    /// Highlight, in the tree view, whichever of its nodes the current query
+    /// selected - mirroring jid's real-time match highlighting - and jump the
+    /// tree's selection to the first match while it's being watched live.
+    fn update_tree_view_matches(&mut self) {
+        let Some(tree_view) = self.tree_view.as_mut() else {
+            return;
+        };
+
+        if self.query.trim().is_empty() {
+            tree_view.clear_matched_nodes();
+            return;
+        }
+
+        tree_view.set_matched_nodes(self.documents[self.active_doc].results.clone());
+
+        let watching_live = self.mode == Mode::TreeView
+            || (self.mode == Mode::Query && self.query_return_mode == Mode::TreeView);
+        if watching_live && let Some(first) = tree_view.first_matched_index() {
+            tree_view.set_selected_index(first);
+        }
     }
 
     /// Get the current query string
@@ -1842,6 +1885,13 @@ impl App {
             }
         }
         (start, cursor)
+    }
+
+    /// The word at the cursor that completion candidates are matched against,
+    /// so the UI can bold the matched prefix within each candidate's name.
+    pub fn completion_prefix(&self) -> &str {
+        let (start, end) = Self::word_range_at_cursor(&self.query, self.cursor_position);
+        &self.query[start..end]
     }
 
     /// Completion candidates (name, description) for the word at the cursor:
@@ -2270,6 +2320,11 @@ impl App {
     /// Mode to return to when leaving Mode::Search; also what it searches.
     pub fn search_return_mode(&self) -> Mode {
         self.search_return_mode
+    }
+
+    /// Mode to return to when leaving Mode::Query (Normal, TreeView, or Preview).
+    pub fn query_return_mode(&self) -> Mode {
+        self.query_return_mode
     }
 
     /// Search term to highlight/jump to: in-progress text, else last committed.
@@ -2937,6 +2992,66 @@ mod tests {
         app.handle_event(tree_toggle_event).unwrap();
         assert_eq!(app.mode(), Mode::TreeView);
         assert!(app.tree_view().is_some());
+    }
+
+    #[test]
+    fn test_colon_enters_query_mode_from_tree_view_and_returns_to_it() {
+        let mut app = create_test_app();
+        app.handle_event(key(KeyCode::Char('t'))).unwrap();
+        assert_eq!(app.mode(), Mode::TreeView);
+
+        app.handle_event(key(KeyCode::Char(':'))).unwrap();
+        assert_eq!(app.mode(), Mode::Query);
+        assert_eq!(app.query_return_mode(), Mode::TreeView);
+
+        app.handle_event(key(KeyCode::Enter)).unwrap();
+        assert_eq!(app.mode(), Mode::TreeView);
+    }
+
+    #[test]
+    fn test_colon_enters_query_mode_from_preview_and_returns_to_it() {
+        let mut app = create_test_app();
+        app.handle_event(key(KeyCode::Char('p'))).unwrap();
+        assert_eq!(app.mode(), Mode::Preview);
+
+        app.handle_event(key(KeyCode::Char(':'))).unwrap();
+        assert_eq!(app.mode(), Mode::Query);
+        assert_eq!(app.query_return_mode(), Mode::Preview);
+
+        app.handle_event(key(KeyCode::Esc)).unwrap();
+        assert_eq!(app.mode(), Mode::Preview);
+    }
+
+    #[test]
+    fn test_live_query_highlights_matching_tree_nodes_and_jumps_to_first() {
+        let mut app = App::new("# Alpha\n\nbody text\n\n# Beta\n".to_string());
+        app.handle_event(key(KeyCode::Char('t'))).unwrap();
+        app.handle_event(key(KeyCode::Char(':'))).unwrap();
+
+        app.set_query(".h".to_string());
+        app.exec_query();
+
+        assert_eq!(app.mode(), Mode::Query);
+        let tree_view = app.tree_view().unwrap();
+        // Both headings should be the live query's matches...
+        assert_eq!(tree_view.first_matched_index(), Some(0));
+        // ...and since the tree is being watched live, selection jumped there.
+        assert_eq!(tree_view.selected_index(), 0);
+    }
+
+    #[test]
+    fn test_clearing_live_query_clears_tree_matches() {
+        let mut app = App::new("# Alpha\n\nbody text\n".to_string());
+        app.handle_event(key(KeyCode::Char('t'))).unwrap();
+        app.handle_event(key(KeyCode::Char(':'))).unwrap();
+
+        app.set_query(".h".to_string());
+        app.exec_query();
+        assert!(app.tree_view().unwrap().first_matched_index().is_some());
+
+        app.set_query(String::new());
+        app.exec_query();
+        assert_eq!(app.tree_view().unwrap().first_matched_index(), None);
     }
 
     #[test]

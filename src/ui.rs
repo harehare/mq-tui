@@ -42,6 +42,7 @@ pub(crate) fn wrap_to_width(line: &str, width: usize) -> Vec<String> {
 }
 
 pub fn draw_ui(frame: &mut Frame, app: &App) {
+    let theme = app.theme();
     let show_tabs = app.document_count() > 1;
 
     let mut constraints = Vec::with_capacity(4);
@@ -77,9 +78,12 @@ pub fn draw_ui(frame: &mut Frame, app: &App) {
         _ => draw_title_bar(frame, app, header_area),
     }
 
-    // While searching, keep showing the view the search started from.
+    // While searching or typing a query, keep showing the view that mode
+    // was entered from (e.g. stay on the tree/preview so it updates live).
     let display_mode = if app.mode() == Mode::Search {
         app.search_return_mode()
+    } else if app.mode() == Mode::Query {
+        app.query_return_mode()
     } else {
         app.mode()
     };
@@ -93,7 +97,7 @@ pub fn draw_ui(frame: &mut Frame, app: &App) {
                 } else {
                     format!("Document Tree - {}", crumbs.join(" \u{203a} "))
                 };
-                tree_view.render_with_title(frame, results_area, &title);
+                tree_view.render_with_title(frame, results_area, &title, &theme);
             }
         }
         Mode::Preview => {
@@ -109,14 +113,14 @@ pub fn draw_ui(frame: &mut Frame, app: &App) {
                 let main_chunks = Layout::default()
                     .direction(Direction::Horizontal)
                     .constraints([
-                        Constraint::Percentage(sidebar),        // Sidebar
+                        Constraint::Percentage(sidebar),       // Sidebar
                         Constraint::Percentage(100 - sidebar), // Main content
                     ])
                     .split(results_area);
 
                 // Draw sidebar
                 if let Some(sidebar) = app.sidebar_tree_view() {
-                    sidebar.render_with_title(frame, main_chunks[0], "Headers");
+                    sidebar.render_with_title(frame, main_chunks[0], "Headers", &theme);
                 }
 
                 // Draw main content area (results and/or detail)
@@ -618,6 +622,7 @@ fn draw_completions_popup(frame: &mut Frame, app: &App, header_area: Rect) {
 
     frame.render_widget(Clear, area);
 
+    let prefix = app.completion_prefix();
     let items: Vec<ListItem> = completions
         .iter()
         .enumerate()
@@ -630,10 +635,32 @@ fn draw_completions_popup(frame: &mut Frame, app: &App, header_area: Rect) {
             } else {
                 Style::default().fg(theme.selector)
             };
-            ListItem::new(Line::from(vec![
-                Span::styled(format!(" {name} "), style),
-                Span::styled(format!(" {description}"), Style::default().fg(theme.muted)),
-            ]))
+
+            // Bold the prefix the user actually typed within the candidate
+            // name, so it's obvious at a glance why each entry matched.
+            let mut name_spans = if i != selected && !prefix.is_empty() && name.starts_with(prefix)
+            {
+                let (matched, rest) = name.split_at(prefix.len());
+                vec![
+                    Span::raw(" "),
+                    Span::styled(
+                        matched.to_string(),
+                        Style::default()
+                            .fg(theme.accent)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(rest.to_string(), style),
+                    Span::raw(" "),
+                ]
+            } else {
+                vec![Span::styled(format!(" {name} "), style)]
+            };
+            name_spans.push(Span::styled(
+                format!(" {description}"),
+                Style::default().fg(theme.muted),
+            ));
+
+            ListItem::new(Line::from(name_spans))
         })
         .collect();
 
@@ -743,7 +770,8 @@ fn draw_results_list(frame: &mut Frame, app: &App, area: Rect) {
 fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
     app.set_preview_viewport_height(area.height);
 
-    let lines = preview::render_preview(app.active_doc_content());
+    let theme = app.theme();
+    let lines = preview::render_preview(app.active_doc_content(), &theme);
     let total_lines = lines.len();
     let inner_height = area.height.saturating_sub(2).max(1);
     let max_scroll = total_lines.saturating_sub(inner_height as usize) as u16;

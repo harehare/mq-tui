@@ -11,9 +11,12 @@ use ratatui::{
 use std::collections::HashMap;
 use unicode_width::UnicodeWidthStr;
 
+use crate::theme::Theme;
+
 /// Render raw Markdown `content` into a list of styled lines suitable for
-/// display in a scrollable `Paragraph`.
-pub fn render_preview(content: &str) -> Vec<Line<'static>> {
+/// display in a scrollable `Paragraph`. Colors are drawn from `theme` so the
+/// preview stays readable under both the dark and light color schemes.
+pub fn render_preview(content: &str, theme: &Theme) -> Vec<Line<'static>> {
     let src_lines: Vec<&str> = content.lines().collect();
     let defs = scan_link_definitions(&src_lines);
     let mut lines = Vec::with_capacity(src_lines.len());
@@ -30,12 +33,12 @@ pub fn render_preview(content: &str) -> Vec<Line<'static>> {
                 in_code_block = false;
                 lines.push(Line::from(Span::styled(
                     code_fence.clone(),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme.muted),
                 )));
             } else {
                 lines.push(Line::from(Span::styled(
                     raw.to_string(),
-                    Style::default().fg(Color::Green),
+                    Style::default().fg(theme.string_lit),
                 )));
             }
             i += 1;
@@ -53,14 +56,14 @@ pub fn render_preview(content: &str) -> Vec<Line<'static>> {
             };
             lines.push(Line::from(Span::styled(
                 title,
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme.muted),
             )));
             i += 1;
             continue;
         }
 
         if let Some((depth, text)) = heading(trimmed) {
-            lines.push(Line::from(Span::styled(text, heading_style(depth))));
+            lines.push(Line::from(Span::styled(text, heading_style(depth, theme))));
             i += 1;
             continue;
         }
@@ -68,7 +71,7 @@ pub fn render_preview(content: &str) -> Vec<Line<'static>> {
         if is_horizontal_rule(trimmed) {
             lines.push(Line::from(Span::styled(
                 "─".repeat(60),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme.muted),
             )));
             i += 1;
             continue;
@@ -79,7 +82,7 @@ pub fn render_preview(content: &str) -> Vec<Line<'static>> {
             lines.push(Line::from(Span::styled(
                 raw.to_string(),
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(theme.muted)
                     .add_modifier(Modifier::ITALIC),
             )));
             i += 1;
@@ -106,18 +109,25 @@ pub fn render_preview(content: &str) -> Vec<Line<'static>> {
                 j += 1;
             }
 
-            let widths = table_column_widths(&all_rows, &defs);
+            let widths = table_column_widths(&all_rows, &defs, theme);
             lines.push(render_table_row(
                 &all_rows[0],
                 &widths,
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(theme.accent)
                     .add_modifier(Modifier::BOLD),
                 &defs,
+                theme,
             ));
-            lines.push(render_table_separator(&widths));
+            lines.push(render_table_separator(&widths, theme));
             for row in &all_rows[1..] {
-                lines.push(render_table_row(row, &widths, Style::default(), &defs));
+                lines.push(render_table_row(
+                    row,
+                    &widths,
+                    Style::default(),
+                    &defs,
+                    theme,
+                ));
             }
 
             i = j;
@@ -127,20 +137,25 @@ pub fn render_preview(content: &str) -> Vec<Line<'static>> {
         if is_table_separator(raw) {
             lines.push(Line::from(Span::styled(
                 "─".repeat(raw.trim().len().clamp(8, 80)),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme.muted),
             )));
             i += 1;
             continue;
         }
 
         if raw.contains('|') && raw.trim().starts_with('|') {
-            lines.push(Line::from(table_row_spans(raw, Style::default(), &defs)));
+            lines.push(Line::from(table_row_spans(
+                raw,
+                Style::default(),
+                &defs,
+                theme,
+            )));
             i += 1;
             continue;
         }
 
         if let Some((level, rest)) = blockquote_prefix(raw) {
-            let color = blockquote_color(level);
+            let color = blockquote_color(level, theme);
             let mut spans = vec![Span::styled(
                 "┃ ".repeat(level.max(1)),
                 Style::default().fg(color),
@@ -149,6 +164,7 @@ pub fn render_preview(content: &str) -> Vec<Line<'static>> {
                 rest,
                 Style::default().fg(color).add_modifier(Modifier::ITALIC),
                 &defs,
+                theme,
             ));
             lines.push(Line::from(spans));
             i += 1;
@@ -157,14 +173,14 @@ pub fn render_preview(content: &str) -> Vec<Line<'static>> {
 
         if let Some((indent, marker, checked, rest)) = list_item(raw) {
             let mut spans = vec![Span::raw(" ".repeat(indent))];
-            spans.push(Span::styled(marker, Style::default().fg(Color::Yellow)));
+            spans.push(Span::styled(marker, Style::default().fg(theme.accent)));
             if let Some(is_checked) = checked {
                 spans.push(Span::styled(
                     if is_checked { "☑ " } else { "☐ " },
-                    Style::default().fg(Color::Cyan),
+                    Style::default().fg(theme.selector),
                 ));
             }
-            spans.extend(parse_inline(rest, Style::default(), &defs));
+            spans.extend(parse_inline(rest, Style::default(), &defs, theme));
             lines.push(Line::from(spans));
             i += 1;
             continue;
@@ -176,7 +192,12 @@ pub fn render_preview(content: &str) -> Vec<Line<'static>> {
             continue;
         }
 
-        lines.push(Line::from(parse_inline(raw, Style::default(), &defs)));
+        lines.push(Line::from(parse_inline(
+            raw,
+            Style::default(),
+            &defs,
+            theme,
+        )));
         i += 1;
     }
 
@@ -231,20 +252,12 @@ fn heading(trimmed: &str) -> Option<(usize, String)> {
     Some((depth, text))
 }
 
-fn heading_style(depth: usize) -> Style {
+fn heading_style(depth: usize, theme: &Theme) -> Style {
+    let base = Style::default().fg(theme.header);
     match depth {
-        1 => Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-        2 => Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
-        3 => Style::default()
-            .fg(Color::Blue)
-            .add_modifier(Modifier::BOLD),
-        _ => Style::default()
-            .fg(Color::Blue)
-            .add_modifier(Modifier::ITALIC),
+        1 => base.add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+        2 | 3 => base.add_modifier(Modifier::BOLD),
+        _ => base.add_modifier(Modifier::ITALIC),
     }
 }
 
@@ -272,14 +285,15 @@ fn table_row_spans(
     raw: &str,
     cell_style: Style,
     defs: &HashMap<String, String>,
+    theme: &Theme,
 ) -> Vec<Span<'static>> {
     let cells: Vec<&str> = raw.trim().trim_matches('|').split('|').collect();
     let mut spans = Vec::new();
     for (idx, cell) in cells.iter().enumerate() {
         if idx > 0 {
-            spans.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(" │ ", Style::default().fg(theme.muted)));
         }
-        spans.extend(parse_inline(cell.trim(), cell_style, defs));
+        spans.extend(parse_inline(cell.trim(), cell_style, defs, theme));
     }
     spans
 }
@@ -293,20 +307,24 @@ fn parse_table_cells(raw: &str) -> Vec<String> {
 }
 
 /// Display width after Markdown syntax is stripped (e.g. `**bold**` -> `bold`).
-fn rendered_cell_width(cell: &str, defs: &HashMap<String, String>) -> usize {
-    parse_inline(cell, Style::default(), defs)
+fn rendered_cell_width(cell: &str, defs: &HashMap<String, String>, theme: &Theme) -> usize {
+    parse_inline(cell, Style::default(), defs, theme)
         .iter()
         .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
         .sum()
 }
 
 /// Widest rendered cell per column, across every row of a table block.
-fn table_column_widths(rows: &[Vec<String>], defs: &HashMap<String, String>) -> Vec<usize> {
+fn table_column_widths(
+    rows: &[Vec<String>],
+    defs: &HashMap<String, String>,
+    theme: &Theme,
+) -> Vec<usize> {
     let col_count = rows.iter().map(|row| row.len()).max().unwrap_or(0);
     let mut widths = vec![0usize; col_count];
     for row in rows {
         for (idx, cell) in row.iter().enumerate() {
-            widths[idx] = widths[idx].max(rendered_cell_width(cell, defs));
+            widths[idx] = widths[idx].max(rendered_cell_width(cell, defs, theme));
         }
     }
     widths
@@ -317,13 +335,14 @@ fn render_table_row(
     widths: &[usize],
     cell_style: Style,
     defs: &HashMap<String, String>,
+    theme: &Theme,
 ) -> Line<'static> {
     let mut spans = Vec::new();
     for (idx, cell) in cells.iter().enumerate() {
         if idx > 0 {
-            spans.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(" │ ", Style::default().fg(theme.muted)));
         }
-        let cell_spans = parse_inline(cell, cell_style, defs);
+        let cell_spans = parse_inline(cell, cell_style, defs, theme);
         let rendered_width: usize = cell_spans
             .iter()
             .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
@@ -340,8 +359,8 @@ fn render_table_row(
     Line::from(spans)
 }
 
-fn render_table_separator(widths: &[usize]) -> Line<'static> {
-    let sep_style = Style::default().fg(Color::DarkGray);
+fn render_table_separator(widths: &[usize], theme: &Theme) -> Line<'static> {
+    let sep_style = Style::default().fg(theme.muted);
     let mut spans = Vec::new();
     for (idx, width) in widths.iter().enumerate() {
         if idx > 0 {
@@ -366,11 +385,11 @@ fn blockquote_prefix(raw: &str) -> Option<(usize, &str)> {
 }
 
 /// Cycle blockquote color by nesting depth so quoted replies stand out.
-fn blockquote_color(level: usize) -> Color {
+fn blockquote_color(level: usize, theme: &Theme) -> Color {
     match level % 3 {
-        1 => Color::Gray,
-        2 => Color::Cyan,
-        _ => Color::Magenta,
+        1 => theme.muted,
+        2 => theme.selector,
+        _ => theme.keyword,
     }
 }
 
@@ -411,7 +430,12 @@ fn checkbox(s: &str) -> (Option<bool>, &str) {
 /// Render a single line of inline Markdown (emphasis, code spans, links,
 /// images, strikethrough) into styled spans, falling back to plain text for
 /// anything it doesn't recognize.
-fn parse_inline(text: &str, base: Style, defs: &HashMap<String, String>) -> Vec<Span<'static>> {
+fn parse_inline(
+    text: &str,
+    base: Style,
+    defs: &HashMap<String, String>,
+    theme: &Theme,
+) -> Vec<Span<'static>> {
     let chars: Vec<char> = text.chars().collect();
     let len = chars.len();
     let mut spans = Vec::new();
@@ -425,7 +449,7 @@ fn parse_inline(text: &str, base: Style, defs: &HashMap<String, String>) -> Vec<
             && let Some((alt, _url, consumed)) = parse_link_like(&chars, i + 1)
         {
             flush(&mut buf, &mut spans, base);
-            spans.push(Span::styled(format!("🖼 {}", alt), base.fg(Color::Magenta)));
+            spans.push(Span::styled(format!("🖼 {}", alt), base.fg(theme.keyword)));
             i += 1 + consumed;
             continue;
         }
@@ -438,7 +462,7 @@ fn parse_inline(text: &str, base: Style, defs: &HashMap<String, String>) -> Vec<
             if !url.is_empty() {
                 spans.push(Span::styled(
                     label,
-                    base.fg(Color::Blue).add_modifier(Modifier::UNDERLINED),
+                    base.fg(theme.function).add_modifier(Modifier::UNDERLINED),
                 ));
                 i += consumed;
                 continue;
@@ -460,7 +484,7 @@ fn parse_inline(text: &str, base: Style, defs: &HashMap<String, String>) -> Vec<
             if defs.contains_key(&ref_label.to_lowercase()) {
                 spans.push(Span::styled(
                     label,
-                    base.fg(Color::Blue).add_modifier(Modifier::UNDERLINED),
+                    base.fg(theme.function).add_modifier(Modifier::UNDERLINED),
                 ));
                 i = end;
             } else {
@@ -476,7 +500,7 @@ fn parse_inline(text: &str, base: Style, defs: &HashMap<String, String>) -> Vec<
             flush(&mut buf, &mut spans, base);
             spans.push(Span::styled(
                 code,
-                Style::default().fg(Color::White).bg(Color::Rgb(40, 40, 40)),
+                Style::default().fg(theme.code_fg).bg(theme.code_bg),
             ));
             i += consumed;
             continue;
@@ -492,6 +516,7 @@ fn parse_inline(text: &str, base: Style, defs: &HashMap<String, String>) -> Vec<
                 &inner,
                 base.add_modifier(Modifier::CROSSED_OUT),
                 defs,
+                theme,
             ));
             i += consumed;
             continue;
@@ -508,6 +533,7 @@ fn parse_inline(text: &str, base: Style, defs: &HashMap<String, String>) -> Vec<
                 &inner,
                 base.add_modifier(Modifier::BOLD),
                 defs,
+                theme,
             ));
             i += consumed;
             continue;
@@ -522,6 +548,7 @@ fn parse_inline(text: &str, base: Style, defs: &HashMap<String, String>) -> Vec<
                 &inner,
                 base.add_modifier(Modifier::ITALIC),
                 defs,
+                theme,
             ));
             i += consumed;
             continue;
@@ -587,6 +614,10 @@ fn parse_link_like(chars: &[char], start: usize) -> Option<(String, String, usiz
 mod tests {
     use super::*;
 
+    fn render_preview(content: &str) -> Vec<Line<'static>> {
+        super::render_preview(content, &Theme::dark())
+    }
+
     fn line_text(line: &Line<'_>) -> String {
         line.spans.iter().map(|s| s.content.as_ref()).collect()
     }
@@ -634,7 +665,7 @@ mod tests {
             .iter()
             .find(|s| s.content.as_ref() == "cargo build")
             .unwrap();
-        assert_eq!(code_span.style.bg, Some(Color::Rgb(40, 40, 40)));
+        assert_eq!(code_span.style.bg, Some(Theme::dark().code_bg));
     }
 
     #[test]
@@ -673,7 +704,7 @@ mod tests {
         let lines = render_preview("```rust\nfn main() {}\n```");
         assert_eq!(lines.len(), 3);
         assert_eq!(line_text(&lines[1]), "fn main() {}");
-        assert_eq!(lines[1].spans[0].style.fg, Some(Color::Green));
+        assert_eq!(lines[1].spans[0].style.fg, Some(Theme::dark().string_lit));
     }
 
     #[test]
