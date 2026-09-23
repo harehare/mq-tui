@@ -3601,10 +3601,16 @@ mod tests {
         assert_eq!(app.query(), "base64d");
 
         app.handle_event(key(KeyCode::Tab)).unwrap();
+        assert_eq!(app.query(), "base64d_bytes");
+
+        app.handle_event(key(KeyCode::Tab)).unwrap();
         assert_eq!(app.query(), "base64url");
 
         app.handle_event(key(KeyCode::Tab)).unwrap();
         assert_eq!(app.query(), "base64urld");
+
+        app.handle_event(key(KeyCode::Tab)).unwrap();
+        assert_eq!(app.query(), "base64urld_bytes");
 
         // Wraps back around to the first candidate.
         app.handle_event(key(KeyCode::Tab)).unwrap();
@@ -3623,10 +3629,10 @@ mod tests {
 
         // Backward from the first candidate wraps to the last.
         app.handle_event(key(KeyCode::BackTab)).unwrap();
-        assert_eq!(app.query(), "base64urld");
+        assert_eq!(app.query(), "base64urld_bytes");
 
         app.handle_event(key(KeyCode::BackTab)).unwrap();
-        assert_eq!(app.query(), "base64url");
+        assert_eq!(app.query(), "base64urld");
     }
 
     #[test]
