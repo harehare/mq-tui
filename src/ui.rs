@@ -696,41 +696,23 @@ fn draw_results_list(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    // Use the combined render for display so that blank lines between nodes are
-    // preserved exactly as they appear in the source (render_with_theme uses
-    // source positions to decide inter-node spacing).
-    //
-    // To compute the correct scroll position (selected_line), render the prefix
-    // nodes[0..selected_idx+1] and subtract the selected node's own line count.
-    // This correctly accounts for variable inter-node spacing without reimplementing
-    // the position-aware rendering logic.
-    let selected_idx = app.selected_idx();
-    let selected_content_lines = mq_markdown::Markdown::new(vec![results[selected_idx].clone()])
-        .to_string()
-        .lines()
-        .count()
-        .max(1);
-
-    let selected_line = if selected_idx == 0 {
-        0
-    } else {
-        mq_markdown::Markdown::new(results[..selected_idx + 1].to_vec())
-            .to_string()
-            .lines()
-            .count()
-            .saturating_sub(selected_content_lines)
-    };
-
-    let selected_end_line = selected_line + selected_content_lines;
+    let lines = app.results_lines();
+    let (selected_line, selected_end_line) = app.selected_line_range();
 
     let search_term = app.active_search_term().filter(|t| !t.is_empty());
     let wrap_width = area.width.saturating_sub(2).max(1) as usize;
 
-    let items: Vec<ListItem> = mq_markdown::Markdown::new(results.to_vec())
-        .to_string()
-        .lines()
+    // Only build items around the selection; every item is at least one row tall,
+    // so a viewport's worth of lines on each side is enough to fill the list.
+    let viewport = area.height as usize;
+    let window_start = selected_line.saturating_sub(viewport);
+    let window_end = (selected_end_line.max(selected_line + 1) + viewport).min(lines.len());
+
+    let items: Vec<ListItem> = lines[window_start.min(window_end)..window_end]
+        .iter()
         .enumerate()
-        .map(|(i, value)| {
+        .map(|(offset, value)| {
+            let i = window_start + offset;
             let is_selected = i >= selected_line && i < selected_end_line;
             let base_style = if is_markdown_header(value) {
                 Style::default()
@@ -761,7 +743,7 @@ fn draw_results_list(frame: &mut Frame, app: &App, area: Rect) {
         .highlight_style(Style::default().add_modifier(Modifier::BOLD));
 
     let mut state = ListState::default();
-    state.select(Some(selected_line));
+    state.select(Some(selected_line.saturating_sub(window_start)));
 
     frame.render_stateful_widget(list, area, &mut state);
 }
@@ -770,9 +752,8 @@ fn draw_results_list(frame: &mut Frame, app: &App, area: Rect) {
 fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
     app.set_preview_viewport_height(area.height);
 
-    let theme = app.theme();
-    let lines = preview::render_preview(app.active_doc_content(), &theme);
-    let total_lines = lines.len();
+    let all_lines = app.preview_lines();
+    let total_lines = all_lines.len();
     let inner_height = area.height.saturating_sub(2).max(1);
     let max_scroll = total_lines.saturating_sub(inner_height as usize) as u16;
     let scroll = app.preview_scroll().min(max_scroll);
@@ -801,7 +782,8 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
         let source_lines: Vec<Line> = app
             .active_doc_content()
             .lines()
-            .map(|l| Line::from(l.to_string()))
+            .take(scroll as usize + inner_height as usize)
+            .map(Line::from)
             .collect();
         let source_block = Block::default().title("Source").borders(Borders::ALL);
         let source_paragraph = Paragraph::new(source_lines)
@@ -817,7 +799,9 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
 
     let block = Block::default().title(title).borders(Borders::ALL);
 
-    let paragraph = Paragraph::new(lines)
+    // Each line wraps to at least one row, so lines past this can't be on screen.
+    let visible_end = (scroll as usize + inner_height as usize).min(total_lines);
+    let paragraph = Paragraph::new(all_lines[..visible_end].to_vec())
         .block(block)
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));

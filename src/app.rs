@@ -5,10 +5,12 @@ use mq_lang::{BUILTIN_FUNCTION_DOC, BUILTIN_SELECTOR_DOC, Engine};
 use mq_markdown::Markdown;
 use ratatui::prelude::*;
 use std::{
-    cell::Cell,
+    cell::{Cell, OnceCell, RefCell},
+    collections::HashMap,
     fmt::Display,
     io::Stdout,
     path::PathBuf,
+    rc::Rc,
     time::{Duration, Instant},
 };
 
@@ -181,6 +183,20 @@ struct Document {
     sidebar_tree_view: Option<TreeView>,
     /// Path on disk this document was loaded from (used for `--watch`)
     path: Option<PathBuf>,
+    /// Must be reset whenever `results` changes; use `set_results`.
+    render: ResultsRender,
+    preview_cache: RefCell<Option<(ThemeName, Rc<Vec<Line<'static>>>)>>,
+}
+
+/// Lazily computed rendering of a document's results, so that cursor moves and
+/// redraws don't re-render every node of a large document.
+#[derive(Default)]
+struct ResultsRender {
+    lines: OnceCell<Vec<String>>,
+    /// (is visible, line count) of each node rendered on its own
+    nodes: OnceCell<Vec<(bool, usize)>>,
+    /// Line count of the render of `results[..=idx]`, filled in on demand
+    ends: RefCell<HashMap<usize, usize>>,
 }
 
 impl Document {
@@ -194,6 +210,8 @@ impl Document {
             all_nodes: Vec::new(),
             sidebar_tree_view: None,
             path: None,
+            render: ResultsRender::default(),
+            preview_cache: RefCell::new(None),
         };
         doc.init_sidebar_tree_view();
         doc
@@ -209,6 +227,8 @@ impl Document {
             all_nodes: Vec::new(),
             sidebar_tree_view: None,
             path: Some(path),
+            render: ResultsRender::default(),
+            preview_cache: RefCell::new(None),
         };
         doc.init_sidebar_tree_view();
         doc
@@ -216,6 +236,159 @@ impl Document {
 
     fn display_name(&self) -> &str {
         self.filename.as_deref().unwrap_or("untitled")
+    }
+
+    fn set_results(&mut self, results: Vec<mq_markdown::Node>) {
+        self.results = results;
+        self.render = ResultsRender::default();
+    }
+
+    fn set_content(&mut self, content: String) {
+        self.content = content;
+        self.preview_cache = RefCell::new(None);
+        self.init_sidebar_tree_view();
+    }
+
+    fn preview_lines(&self, theme_name: ThemeName, theme: &Theme) -> Rc<Vec<Line<'static>>> {
+        let mut cache = self.preview_cache.borrow_mut();
+        match &*cache {
+            Some((name, lines)) if *name == theme_name => lines.clone(),
+            _ => {
+                let lines = Rc::new(preview::render_preview(&self.content, theme));
+                *cache = Some((theme_name, lines.clone()));
+                lines
+            }
+        }
+    }
+
+    fn rendered_lines(&self) -> &[String] {
+        self.render.lines.get_or_init(|| {
+            Markdown::new(self.results.clone())
+                .to_string()
+                .lines()
+                .map(str::to_string)
+                .collect()
+        })
+    }
+
+    fn node_info(&self, idx: usize) -> (bool, usize) {
+        self.render.nodes.get_or_init(|| {
+            self.results
+                .iter()
+                .map(|node| {
+                    let rendered = Markdown::new(vec![node.clone()]).to_string();
+                    (!rendered.trim().is_empty(), rendered.lines().count().max(1))
+                })
+                .collect()
+        })[idx]
+    }
+
+    /// First line of `results[idx]` within `rendered_lines`.
+    fn node_start_line(&self, idx: usize) -> usize {
+        self.node_end_line(idx)
+            .saturating_sub(self.node_info(idx).1)
+    }
+
+    /// Nodes after which the renderer carries no state other than the node's own
+    /// position, so what follows renders the same as when rendering from it.
+    fn is_render_anchor(&self, idx: usize) -> bool {
+        !matches!(
+            self.results[idx],
+            mq_markdown::Node::List(_)
+                | mq_markdown::Node::TableCell(_)
+                | mq_markdown::Node::TableAlign(_)
+                | mq_markdown::Node::Code(_)
+        ) && self.node_info(idx).0
+    }
+
+    fn prev_render_anchor(&self, idx: usize) -> Option<usize> {
+        (0..idx).rev().find(|&i| self.is_render_anchor(i))
+    }
+
+    fn node_end_line(&self, idx: usize) -> usize {
+        if let Some(&end) = self.render.ends.borrow().get(&idx) {
+            return end;
+        }
+
+        let mut chain = vec![idx];
+        while let Some(anchor) = self.prev_render_anchor(*chain.last().unwrap()) {
+            if self.render.ends.borrow().contains_key(&anchor) {
+                break;
+            }
+            chain.push(anchor);
+        }
+
+        let count_lines =
+            |nodes: &[mq_markdown::Node]| Markdown::new(nodes.to_vec()).to_string().lines().count();
+        for &k in chain.iter().rev() {
+            // Rendering is append-only, so the lines added after an anchor only
+            // depend on the nodes from the anchor onwards.
+            let end = match self.prev_render_anchor(k) {
+                Some(anchor) => {
+                    let anchor_end = self.render.ends.borrow()[&anchor];
+                    anchor_end + count_lines(&self.results[anchor..=k]) - self.node_info(anchor).1
+                }
+                None => count_lines(&self.results[..=k]),
+            };
+            self.render.ends.borrow_mut().insert(k, end);
+        }
+
+        self.render.ends.borrow()[&idx]
+    }
+
+    /// Line range `[start, end)` covered by the selected result.
+    fn selected_line_range(&self) -> (usize, usize) {
+        let start = self.node_start_line(self.selected_idx);
+        (start, start + self.node_info(self.selected_idx).1)
+    }
+
+    /// Next visible node from `start_idx` that renders at a different line.
+    fn next_visible_from(&self, start_idx: usize, forward: bool) -> usize {
+        let len = self.results.len();
+        if len == 0 {
+            return 0;
+        }
+
+        let current_line = self.node_start_line(start_idx);
+        let mut idx = start_idx;
+        for _ in 0..len {
+            idx = if forward {
+                (idx + 1) % len
+            } else if idx == 0 {
+                len - 1
+            } else {
+                idx - 1
+            };
+
+            if self.node_info(idx).0 && self.node_start_line(idx) != current_line {
+                return idx;
+            }
+        }
+
+        start_idx
+    }
+
+    /// Nearest visible result index from `start`; `start` if none is visible.
+    fn next_visible(&self, start: usize, forward: bool) -> usize {
+        let len = self.results.len();
+        if len == 0 {
+            return 0;
+        }
+        let mut idx = start;
+        for _ in 0..len {
+            if self.node_info(idx).0 {
+                return idx;
+            }
+            idx = if forward {
+                (idx + 1) % len
+            } else if idx == 0 {
+                len - 1
+            } else {
+                idx - 1
+            };
+        }
+
+        start
     }
 
     fn init_sidebar_tree_view(&mut self) {
@@ -554,8 +727,7 @@ impl App {
             if let Ok(content) = std::fs::read_to_string(&path)
                 && content != doc.content
             {
-                doc.content = content;
-                doc.init_sidebar_tree_view();
+                doc.set_content(content);
                 changed = true;
             }
         }
@@ -1459,8 +1631,13 @@ impl App {
         &self.active_doc().content
     }
 
+    pub fn preview_lines(&self) -> Rc<Vec<Line<'static>>> {
+        self.active_doc()
+            .preview_lines(self.theme_name(), &self.theme())
+    }
+
     fn preview_total_lines(&self) -> usize {
-        preview::render_preview(&self.active_doc().content, &self.theme()).len()
+        self.preview_lines().len()
     }
 
     fn clamp_preview_scroll(&mut self) {
@@ -1513,7 +1690,7 @@ impl App {
                     r#"import "section" | nodes | section::split({}) | section::title_contains("{}") | section::collect()"#,
                     heading.depth, value
                 );
-                self.documents[active].results = section_content;
+                self.documents[active].set_results(section_content);
                 self.documents[active].selected_idx = 0;
                 self.cursor_position = self.query.len();
             }
@@ -1541,13 +1718,17 @@ impl App {
 
                         match engine.eval(&self.query, md_nodes.into_iter()) {
                             Ok(results) => {
-                                doc.results = results
-                                    .into_iter()
-                                    .map(|runtime_value| match runtime_value {
-                                        mq_lang::RuntimeValue::Markdown(node, _) => (*node).clone(),
-                                        _ => runtime_value.to_string().into(),
-                                    })
-                                    .collect();
+                                doc.set_results(
+                                    results
+                                        .into_iter()
+                                        .map(|runtime_value| match runtime_value {
+                                            mq_lang::RuntimeValue::Markdown(node, _) => {
+                                                (*node).clone()
+                                            }
+                                            _ => runtime_value.to_string().into(),
+                                        })
+                                        .collect(),
+                                );
                                 doc.error_msg = None;
                             }
                             Err(err) => {
@@ -1557,13 +1738,13 @@ impl App {
                         }
                     } else {
                         // Show all nodes when query is empty
-                        doc.results = markdown.nodes;
+                        doc.set_results(markdown.nodes);
                         doc.error_msg = None;
                     }
                 }
                 Err(err) => {
                     doc.error_msg = Some(format!("Markdown parse error: {}", err));
-                    doc.results = Vec::new();
+                    doc.set_results(Vec::new());
                 }
             }
 
@@ -1574,7 +1755,7 @@ impl App {
 
             // Advance past invisible nodes (nodes that render to nothing in combined output)
             if !doc.results.is_empty() {
-                doc.selected_idx = Self::next_visible_in(&doc.results, doc.selected_idx, true);
+                doc.selected_idx = doc.next_visible(doc.selected_idx, true);
             }
         }
 
@@ -1617,6 +1798,14 @@ impl App {
     }
 
     /// Get the currently selected result index (for the active document)
+    pub fn results_lines(&self) -> &[String] {
+        self.active_doc().rendered_lines()
+    }
+
+    pub fn selected_line_range(&self) -> (usize, usize) {
+        self.active_doc().selected_line_range()
+    }
+
     pub fn selected_idx(&self) -> usize {
         self.active_doc().selected_idx
     }
@@ -1669,7 +1858,7 @@ impl App {
 
     #[cfg(test)]
     pub fn set_results(&mut self, results: Vec<mq_markdown::Node>) {
-        self.active_doc_mut().results = results;
+        self.active_doc_mut().set_results(results);
     }
 
     #[cfg(test)]
@@ -1763,113 +1952,13 @@ impl App {
         };
     }
 
-    /// Move to next/previous visible node from current position.
-    /// This skips invisible nodes until finding a visible one.
     fn next_visible_from_current(&self, forward: bool) -> usize {
-        Self::next_visible_from_current_in(
-            &self.active_doc().results,
-            self.active_doc().selected_idx,
-            forward,
-        )
+        let doc = self.active_doc();
+        doc.next_visible_from(doc.selected_idx, forward)
     }
 
-    fn next_visible_from_current_in(
-        results: &[mq_markdown::Node],
-        start_idx: usize,
-        forward: bool,
-    ) -> usize {
-        let len = results.len();
-        if len == 0 {
-            return 0;
-        }
-
-        // Calculate the current rendered line position
-        let current_line = if start_idx == 0 {
-            0
-        } else {
-            Markdown::new(results[..start_idx + 1].to_vec())
-                .to_string()
-                .lines()
-                .count()
-                .saturating_sub(
-                    Markdown::new(vec![results[start_idx].clone()])
-                        .to_string()
-                        .lines()
-                        .count()
-                        .max(1),
-                )
-        };
-
-        // Find next node that renders to a different line position
-        let mut idx = start_idx;
-        for _ in 0..len {
-            // Move to next/previous position
-            if forward {
-                idx = (idx + 1) % len;
-            } else {
-                idx = if idx == 0 { len - 1 } else { idx - 1 };
-            }
-
-            // Check if this node is visible (renders to non-empty content)
-            let rendered = Markdown::new(vec![results[idx].clone()]).to_string();
-            if !rendered.trim().is_empty() {
-                // Calculate the line position of this node
-                let node_line = if idx == 0 {
-                    0
-                } else {
-                    Markdown::new(results[..idx + 1].to_vec())
-                        .to_string()
-                        .lines()
-                        .count()
-                        .saturating_sub(rendered.lines().count().max(1))
-                };
-
-                // Return this node if it's at a different line position
-                if node_line != current_line {
-                    return idx;
-                }
-            }
-        }
-
-        start_idx // No different position found, stay put
-    }
-
-    /// Find the nearest visible result index from `start`, searching in `forward` direction.
-    /// A node is invisible when `render_with_theme` skips it (renders to "" or only whitespace).
-    /// Returns `start` unchanged if all results are invisible.
     fn next_visible(&self, start: usize, forward: bool) -> usize {
-        Self::next_visible_in(&self.active_doc().results, start, forward)
-    }
-
-    fn next_visible_in(results: &[mq_markdown::Node], start: usize, forward: bool) -> usize {
-        let len = results.len();
-        if len == 0 {
-            return 0;
-        }
-        let mut idx = start;
-        let mut checked = 0;
-
-        while checked < len {
-            let rendered = Markdown::new(vec![results[idx].clone()]).to_string();
-
-            // A node is visible if it renders to non-empty, non-whitespace content
-            // We need to check both the raw length and trimmed length
-            let is_visible = !rendered.trim().is_empty();
-
-            if is_visible {
-                return idx;
-            }
-
-            // Move to next position
-            if forward {
-                idx = (idx + 1) % len;
-            } else {
-                idx = if idx == 0 { len - 1 } else { idx - 1 };
-            }
-            checked += 1;
-        }
-
-        start // all invisible: stay put
+        self.active_doc().next_visible(start, forward)
     }
 
     /// Range of the identifier-like word (`[A-Za-z0-9_.]`) ending at `cursor`.
@@ -4000,5 +4089,32 @@ mod tests {
         assert_eq!(app.theme_name(), ThemeName::Dark);
         app.set_theme_name(ThemeName::Light);
         assert_eq!(app.theme_name(), ThemeName::Light);
+    }
+
+    #[test]
+    fn test_node_start_lines_match_prefix_render() {
+        let mixed = "# Title\n\nPara one\nstill para\n\n- a\n- b\n  - nested\n    - deeper\n- c\n\n1. one\n2. two\n\n> quote\n> more\nlazy\n\n    indented code\n\n- list\n\n    code after list\n\n| a | b |\n|---|:-:|\n| 1 | 2 |\n| 3 | 4 |\n| x | y |\n|---|---|\n| z | w |\n\n```rust\nfn f() {}\n```\n\n---\n\n<div>html</div>\n\n[ref]: https://example.com\n\n- [ ] task\n- [x] done\n\n## End\ntext";
+        let sources = [
+            mixed,
+            include_str!("../README.md"),
+            include_str!("../assets/demo.md"),
+            include_str!("../assets/demo2.md"),
+        ];
+        for source in sources {
+            let mut doc = Document::new(String::new(), None);
+            doc.set_results(Markdown::from_markdown_str(source).unwrap().nodes);
+            for idx in (0..doc.results.len()).rev() {
+                let expected = if idx == 0 {
+                    0
+                } else {
+                    Markdown::new(doc.results[..idx + 1].to_vec())
+                        .to_string()
+                        .lines()
+                        .count()
+                        .saturating_sub(doc.node_info(idx).1)
+                };
+                assert_eq!(doc.node_start_line(idx), expected, "node {idx}");
+            }
+        }
     }
 }
