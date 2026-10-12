@@ -1,7 +1,8 @@
 use arboard::Clipboard;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind};
 use miette::IntoDiagnostic;
-use mq_lang::{BUILTIN_FUNCTION_DOC, BUILTIN_SELECTOR_DOC, Engine};
+use mq_help::BUILTIN_DOC;
+use mq_lang::Engine;
 use mq_markdown::Markdown;
 use ratatui::prelude::*;
 use std::{
@@ -1993,16 +1994,16 @@ impl App {
         }
 
         let mut matches: Vec<(String, String)> = if word.starts_with('.') {
-            BUILTIN_SELECTOR_DOC
-                .iter()
-                .filter(|(name, _)| name.starts_with(word))
-                .map(|(name, doc)| (name.to_string(), doc.description.to_string()))
+            BUILTIN_DOC
+                .selectors()
+                .filter(|doc| doc.name.starts_with(word))
+                .map(|doc| (doc.name.to_string(), doc.description.to_string()))
                 .collect()
         } else {
-            BUILTIN_FUNCTION_DOC
-                .iter()
-                .filter(|(name, _)| name.starts_with(word))
-                .map(|(name, doc)| (name.to_string(), doc.description.to_string()))
+            BUILTIN_DOC
+                .functions()
+                .filter(|doc| doc.name.starts_with(word))
+                .map(|doc| (doc.name.to_string(), doc.description.to_string()))
                 .collect()
         };
         matches.sort();
