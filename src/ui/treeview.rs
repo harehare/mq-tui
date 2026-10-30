@@ -57,7 +57,7 @@ impl TreeItem {
                     .iter()
                     .map(|n| n.value().trim().to_string())
                     .collect::<String>();
-                let hashes = "#".repeat(h.depth as usize);
+                let hashes = "#".repeat(usize::from(h.depth));
                 format!("{} {}", hashes, text)
             }
             Node::List(l) => {
@@ -413,8 +413,8 @@ impl TreeView {
                         .collect::<String>();
 
                     // Add indentation based on header depth (depth - 1 spaces)
-                    let indent = "  ".repeat((h.depth.saturating_sub(1)) as usize);
-                    let hashes = "#".repeat(h.depth as usize);
+                    let indent = "  ".repeat(usize::from(h.depth.get().saturating_sub(1)));
+                    let hashes = "#".repeat(usize::from(h.depth));
                     (indent, format!("{} {}", hashes, text))
                 } else {
                     let indent = "  ".repeat(tree_item.depth);
@@ -493,7 +493,7 @@ mod tests {
 
     fn create_test_heading() -> Node {
         Node::Heading(Heading {
-            depth: 1,
+            depth: mq_markdown::HeadingDepth::H1,
             values: vec![Node::Text(Text {
                 value: "Test Heading".to_string(),
                 position: None,
@@ -602,6 +602,7 @@ mod tests {
             checked: None,
             spread: false,
             start: None,
+            marker: None,
             position: None,
         });
         assert!(TreeItem::has_children(&list_with_items));
@@ -697,6 +698,7 @@ mod tests {
             checked: None,
             spread: false,
             start: None,
+            marker: None,
             position: None,
         });
         assert!(!TreeItem::has_children(&empty_list));
@@ -774,6 +776,7 @@ mod tests {
             checked: None,
             spread: false,
             start: None,
+            marker: None,
             position: None,
         });
         assert_eq!(
@@ -790,6 +793,7 @@ mod tests {
             checked: None,
             spread: false,
             start: None,
+            marker: None,
             position: None,
         });
         assert_eq!(
@@ -862,7 +866,10 @@ mod tests {
         assert_eq!(TreeItem::create_display_text(&image), "Image: Alt text");
 
         // Test horizontal rule
-        let hr = Node::HorizontalRule(HorizontalRule { position: None });
+        let hr = Node::HorizontalRule(HorizontalRule {
+            marker: None,
+            position: None,
+        });
         assert_eq!(TreeItem::create_display_text(&hr), "Horizontal Rule");
 
         // Test table components - removing TableHeader test as it doesn't have values field
@@ -1062,6 +1069,7 @@ mod tests {
             checked: None,
             spread: false,
             start: None,
+            marker: None,
             position: None,
         });
         let list_item = TreeItem::new(list_node, 0, 0);
@@ -1229,6 +1237,7 @@ mod tests {
                 checked: None,
                 spread: false,
                 start: None,
+                marker: None,
                 position: None,
             }),
         ];

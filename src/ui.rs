@@ -1420,7 +1420,7 @@ mod tests {
         let mut app = App::new("test.md".to_string());
         let results = vec![
             mq_markdown::Node::Heading(mq_markdown::Heading {
-                depth: 1,
+                depth: mq_markdown::HeadingDepth::H1,
                 position: None,
                 values: vec![mq_markdown::Node::Text(mq_markdown::Text {
                     value: "Test Heading".to_string(),
