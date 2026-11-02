@@ -39,8 +39,8 @@ impl Theme {
         Self {
             accent: Color::Yellow,
             muted: Color::DarkGray,
-            selection_fg: Color::Black,
-            selection_bg: Color::White,
+            selection_fg: Color::White,
+            selection_bg: Color::Rgb(60, 70, 90),
             header: Color::Cyan,
             success: Color::Green,
             keyword: Color::Magenta,
