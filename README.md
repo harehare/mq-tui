@@ -28,7 +28,6 @@ Interactive terminal interface for querying and manipulating Markdown content
 - ⚡ **Vim-style Navigation** - Efficient keyboard shortcuts (j/k, hjkl)
 - 📋 **Clipboard Integration** - Copy results directly to clipboard
 - 🎨 **Syntax Highlighting** - Color-coded display of different Markdown elements
-- 📖 **Detail View** - Inspect individual elements in depth
 - 🔄 **Query History** - Navigate through previous queries
 - 🎯 **fx-inspired UX** - Familiar interface for JSON query tool users
 - 🕹️ **Command Palette** - Fuzzy-searchable list of app actions (`Ctrl+K`)
@@ -121,13 +120,9 @@ Press `:` from inside the tree to type a query without leaving it: as you type, 
 
 Press `p` to switch to a rendered preview of the active document - headings, bold/italic text, lists, blockquotes, code blocks, tables, and links are styled to look close to their final rendered form instead of raw Markdown syntax, using the same color palette as the active theme. Use `↑`/`k`, `↓`/`j`, `PageUp`/`PageDown`, or `g`/`G` to scroll, and press `p` or `Esc` to return to normal mode. Press `s` while in preview mode to split the view and show the raw Markdown source side-by-side with the rendered output, scrolling in sync. Press `:` to type a query without leaving the preview.
 
-### Detail View
-
-Press `d` to toggle between list view and split view. In split view, the left pane shows the result list while the right pane displays detailed information about the selected item.
-
 ### Query History
 
-Every executed query is saved in history. Use `↑` and `↓` in query mode to navigate through previous queries.
+Every executed query is saved in history. Use `↑` and `↓` in query mode to navigate through previous queries (while the completion popup is showing, they select candidates instead; clear the query to get back to history).
 
 ### Clipboard Integration
 
@@ -181,7 +176,6 @@ Press `?` or `F1` at any time in the app for this same list, in context.
 | `t`                 | Toggle tree view mode                      |
 | `p`                 | Toggle rendered preview mode               |
 | `s`                 | Toggle sidebar (headers)                   |
-| `d`                 | Toggle detail view for selected item       |
 | `y`                 | Copy results to clipboard                  |
 | `Y`                 | Copy selected row to clipboard             |
 | `/`                 | Incremental search within results          |
@@ -193,7 +187,7 @@ Press `?` or `F1` at any time in the app for this same list, in context.
 | `o`                 | Open a file as a new tab                   |
 | `←` / `→`           | Switch tabs (when multiple files are open) |
 | `Tab` / `Shift+Tab` | Switch tabs (when multiple files are open) |
-| `<` / `>`           | Resize the sidebar (when `s` is on), otherwise the detail split (when `d` is on) |
+| `<` / `>`           | Resize the sidebar (when `s` is on) |
 
 ### Navigation
 
@@ -212,7 +206,7 @@ Press `?` or `F1` at any time in the app for this same list, in context.
 | ---------------------- | ------------------------------------------------------------------------------ |
 | `Enter`                | Execute query and return to normal mode                                        |
 | `Esc`                  | Exit query mode without executing                                              |
-| `↑` / `↓`              | Navigate query history                                                         |
+| `↑` / `↓`              | Select a completion candidate (popup scrolls past the first page), otherwise navigate query history |
 | `←` / `→`              | Move cursor in query string                                                    |
 | `Home` / `End`         | Jump to start/end of query                                                     |
 | `Backspace` / `Delete` | Edit query text                                                                |
@@ -292,9 +286,12 @@ show_hint_bar = true
 
 # Color theme: "dark" (default) or "light"
 theme = "dark"
+
+# Enlarge H1/H2 in the preview on kitty (text sizing protocol; not inside tmux) (default: true)
+scale_headings = true
 ```
 
-Both settings can also be overridden for a single run with `--no-hints` and `--theme <dark|light>`, without touching the file.
+`show_hint_bar` and `theme` can also be overridden for a single run with `--no-hints` and `--theme <dark|light>`, without touching the file.
 
 ## Related Projects
 

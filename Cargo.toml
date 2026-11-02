@@ -22,7 +22,7 @@ mq-help = {version = "0.10.0", default-features = false}
 mq-lang = "0.10.0"
 mq-markdown = "0.10.0"
 notify-debouncer-mini = "0.7.0"
-ratatui = "0.30.0"
+ratatui = {version = "0.30.0", features = ["unstable-rendered-line-info"]}
 serde = {version = "1", features = ["derive"]}
 toml = "1.1"
 unicode-width = "0.2.2"

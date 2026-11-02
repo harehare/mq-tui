@@ -93,12 +93,6 @@ const PALETTE_ACTIONS: &[PaletteAction] = &[
         modifiers: KeyModifiers::NONE,
     },
     PaletteAction {
-        label: "Detail view",
-        description: "Toggle detail view for the selected item",
-        key: KeyCode::Char('d'),
-        modifiers: KeyModifiers::NONE,
-    },
-    PaletteAction {
         label: "Copy results",
         description: "Copy all results to the clipboard",
         key: KeyCode::Char('y'),
@@ -186,7 +180,7 @@ struct Document {
     path: Option<PathBuf>,
     /// Must be reset whenever `results` changes; use `set_results`.
     render: ResultsRender,
-    preview_cache: RefCell<Option<(ThemeName, Rc<Vec<Line<'static>>>)>>,
+    preview_cache: RefCell<Option<(ThemeName, Rc<preview::Preview>)>>,
 }
 
 /// Lazily computed rendering of a document's results, so that cursor moves and
@@ -250,14 +244,23 @@ impl Document {
         self.init_sidebar_tree_view();
     }
 
-    fn preview_lines(&self, theme_name: ThemeName, theme: &Theme) -> Rc<Vec<Line<'static>>> {
+    fn preview(
+        &self,
+        theme_name: ThemeName,
+        theme: &Theme,
+        scale_headings: bool,
+    ) -> Rc<preview::Preview> {
         let mut cache = self.preview_cache.borrow_mut();
         match &*cache {
-            Some((name, lines)) if *name == theme_name => lines.clone(),
+            Some((name, preview)) if *name == theme_name => preview.clone(),
             _ => {
-                let lines = Rc::new(preview::render_preview(&self.content, theme));
-                *cache = Some((theme_name, lines.clone()));
-                lines
+                let preview = Rc::new(preview::render_preview(
+                    &self.content,
+                    theme,
+                    scale_headings,
+                ));
+                *cache = Some((theme_name, preview.clone()));
+                preview
             }
         }
     }
@@ -476,8 +479,6 @@ pub struct App {
     transient_error: Option<String>,
     /// Current app mode
     mode: Mode,
-    /// Show detailed view of selected item
-    show_detail: bool,
     /// History of executed queries
     query_history: Vec<String>,
     /// Current position in query history
@@ -536,8 +537,6 @@ pub struct App {
     completion_cycle: Option<CompletionCycle>,
     /// Persisted UI settings (theme, hint bar visibility)
     config: Config,
-    /// Split ratio (left pane percent) for the results/detail split view
-    detail_split_percent: u16,
     /// Split ratio (source pane percent) for the preview/source split view
     preview_split_percent: u16,
     sidebar_split_percent: u16,
@@ -596,7 +595,6 @@ impl App {
             should_quit: false,
             transient_error: None,
             mode: Mode::Normal,
-            show_detail: false,
             query_history: Vec::new(),
             history_position: None,
             cursor_position: 0,
@@ -624,7 +622,6 @@ impl App {
             preview_split: false,
             completion_cycle: None,
             config: crate::config::load(),
-            detail_split_percent: 40,
             preview_split_percent: 50,
             sidebar_split_percent: 20,
             palette_query: String::new(),
@@ -793,10 +790,6 @@ impl App {
                 (KeyCode::Char('q'), _) | (KeyCode::Esc, _) => {
                     self.should_quit = true;
                 }
-                // Toggle detailed view
-                (KeyCode::Char('d'), _) => {
-                    self.show_detail = !self.show_detail;
-                }
                 // Enter query mode
                 (KeyCode::Char(':'), _) => {
                     self.query_return_mode = Mode::Normal;
@@ -870,12 +863,6 @@ impl App {
                 }
                 (KeyCode::Char('>'), _) if self.show_tree_sidebar => {
                     self.adjust_sidebar_split(5);
-                }
-                (KeyCode::Char('<'), _) if self.show_detail => {
-                    self.adjust_detail_split(-5);
-                }
-                (KeyCode::Char('>'), _) if self.show_detail => {
-                    self.adjust_detail_split(5);
                 }
                 // Switch tabs
                 (KeyCode::Right, _) | (KeyCode::Tab, _) => {
@@ -1024,6 +1011,7 @@ impl App {
                 // Edit query
                 (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
                     self.completion_cycle = None;
+                    self.history_position = None;
                     self.query.insert(self.cursor_position, c);
                     self.cursor_position += 1;
                     self.last_exec = Instant::now();
@@ -1031,6 +1019,7 @@ impl App {
                 }
                 (KeyCode::Backspace, _) if self.cursor_position > 0 => {
                     self.completion_cycle = None;
+                    self.history_position = None;
                     self.query.remove(self.cursor_position - 1);
                     self.cursor_position -= 1;
                     self.last_exec = Instant::now();
@@ -1038,6 +1027,7 @@ impl App {
                 }
                 (KeyCode::Delete, _) if self.cursor_position < self.query.len() => {
                     self.completion_cycle = None;
+                    self.history_position = None;
                     self.query.remove(self.cursor_position);
                     self.last_exec = Instant::now();
                     self.query_pending = true;
@@ -1058,6 +1048,14 @@ impl App {
                 (KeyCode::End, _) => {
                     self.completion_cycle = None;
                     self.cursor_position = self.query.len();
+                }
+                // Up/Down select completion candidates while the popup is
+                // showing; otherwise they walk the query history.
+                (KeyCode::Up, _) if self.completion_nav_active() => {
+                    self.step_completion(false);
+                }
+                (KeyCode::Down, _) if self.completion_nav_active() => {
+                    self.step_completion(true);
                 }
                 // Navigate history
                 (KeyCode::Up, _) if !self.query_history.is_empty() => {
@@ -1100,15 +1098,29 @@ impl App {
     /// cycle for the word at the cursor, starting a new cycle if none is
     /// active. Falls back to switching tabs if there's nothing to complete.
     fn cycle_completion(&mut self, forward: bool) {
+        if !self.step_completion(forward) {
+            if forward {
+                self.next_tab();
+            } else {
+                self.prev_tab();
+            }
+        }
+    }
+
+    /// Whether Up/Down should move through completions rather than history.
+    /// History browsing keeps the arrows until the user edits the recalled query.
+    fn completion_nav_active(&self) -> bool {
+        self.completion_cycle.is_some()
+            || (self.history_position.is_none() && !self.query_completions().is_empty())
+    }
+
+    /// Select the next/previous completion candidate, starting a cycle if none
+    /// is active. Returns false when there is nothing to complete.
+    fn step_completion(&mut self, forward: bool) -> bool {
         if self.completion_cycle.is_none() {
             let matches = self.query_completions();
             if matches.is_empty() {
-                if forward {
-                    self.next_tab();
-                } else {
-                    self.prev_tab();
-                }
-                return;
+                return false;
             }
             let (start, _) = Self::word_range_at_cursor(&self.query, self.cursor_position);
             self.completion_cycle = Some(CompletionCycle {
@@ -1134,6 +1146,7 @@ impl App {
         self.cursor_position = start + name.len();
         self.last_exec = Instant::now();
         self.query_pending = true;
+        true
     }
 
     fn handle_help_mode_event(&mut self, event: Event) -> miette::Result<()> {
@@ -1579,11 +1592,6 @@ impl App {
         self.config.show_hint_bar = show;
     }
 
-    /// Percentage width of the results list in the results/detail split view.
-    pub fn detail_split_percent(&self) -> u16 {
-        self.detail_split_percent
-    }
-
     /// Percentage width of the source pane in the preview/source split view.
     pub fn preview_split_percent(&self) -> u16 {
         self.preview_split_percent
@@ -1591,14 +1599,6 @@ impl App {
 
     pub fn sidebar_split_percent(&self) -> u16 {
         self.sidebar_split_percent
-    }
-
-    /// Widen/narrow the results pane relative to the detail pane, in 5% steps.
-    fn adjust_detail_split(&mut self, delta: i16) {
-        self.detail_split_percent = self
-            .detail_split_percent
-            .saturating_add_signed(delta)
-            .clamp(15, 85);
     }
 
     /// Widen/narrow the source pane relative to the rendered preview, in 5% steps.
@@ -1632,13 +1632,18 @@ impl App {
         &self.active_doc().content
     }
 
-    pub fn preview_lines(&self) -> Rc<Vec<Line<'static>>> {
+    pub fn preview(&self) -> Rc<preview::Preview> {
         self.active_doc()
-            .preview_lines(self.theme_name(), &self.theme())
+            .preview(self.theme_name(), &self.theme(), self.scale_headings())
+    }
+
+    /// Enlarged headings need both the config opt-in and terminal support.
+    pub fn scale_headings(&self) -> bool {
+        self.config.scale_headings && crate::util::supports_text_sizing()
     }
 
     fn preview_total_lines(&self) -> usize {
-        self.preview_lines().len()
+        self.preview().lines.len()
     }
 
     fn clamp_preview_scroll(&mut self) {
@@ -1828,11 +1833,6 @@ impl App {
         self.mode
     }
 
-    /// Check if detailed view is enabled
-    pub fn show_detail(&self) -> bool {
-        self.show_detail
-    }
-
     /// Get the cursor position in the query
     pub fn cursor_position(&self) -> usize {
         self.cursor_position
@@ -2007,7 +2007,6 @@ impl App {
                 .collect()
         };
         matches.sort();
-        matches.truncate(8);
         matches
     }
 
@@ -2446,7 +2445,6 @@ mod tests {
         assert_eq!(app.query(), ".");
         assert_eq!(app.selected_idx(), 0);
         assert_eq!(app.mode(), Mode::Normal);
-        assert!(!app.show_detail());
         assert_eq!(app.cursor_position(), 0);
         assert!(app.filename().is_none());
         assert!(app.error_msg().is_none());
@@ -2703,25 +2701,6 @@ mod tests {
         });
         app.handle_event(home_event).unwrap();
         assert_eq!(app.selected_idx(), 0);
-    }
-
-    #[test]
-    fn test_normal_mode_toggle_detail() {
-        let mut app = create_test_app();
-        assert!(!app.show_detail());
-
-        let detail_event = Event::Key(KeyEvent {
-            code: KeyCode::Char('d'),
-            modifiers: KeyModifiers::NONE,
-            kind: crossterm::event::KeyEventKind::Press,
-            state: crossterm::event::KeyEventState::NONE,
-        });
-        app.handle_event(detail_event.clone()).unwrap();
-        assert!(app.show_detail());
-
-        // Toggle again
-        app.handle_event(detail_event).unwrap();
-        assert!(!app.show_detail());
     }
 
     #[test]
@@ -3748,6 +3727,37 @@ mod tests {
     }
 
     #[test]
+    fn test_arrows_select_completions_beyond_first_page() {
+        let mut app = create_test_app();
+        app.set_mode(Mode::Query);
+        app.set_query(".".to_string());
+        app.set_cursor_position(1);
+        let total = app.query_completions().len();
+        assert!(total > 8, "selectors should exceed one popup page");
+
+        for _ in 0..total - 1 {
+            app.handle_event(key(KeyCode::Down)).unwrap();
+        }
+        assert_eq!(app.completion_selected_index(), total - 2);
+        assert_eq!(app.active_completions().len(), total);
+
+        app.handle_event(key(KeyCode::Up)).unwrap();
+        assert_eq!(app.completion_selected_index(), total - 3);
+    }
+
+    #[test]
+    fn test_arrows_use_history_when_nothing_to_complete() {
+        let mut app = create_test_app();
+        app.set_mode(Mode::Query);
+        app.set_query(".h".to_string());
+        app.handle_event(key(KeyCode::Enter)).unwrap();
+        app.set_mode(Mode::Query);
+        app.set_query(String::new());
+        app.handle_event(key(KeyCode::Up)).unwrap();
+        assert_eq!(app.query(), ".h");
+    }
+
+    #[test]
     fn test_tab_switches_tabs_when_no_completion() {
         let mut app = App::with_files(vec![
             ("# One".to_string(), "one.md".to_string()),
@@ -4035,24 +4045,6 @@ mod tests {
     }
 
     #[test]
-    fn test_detail_split_adjust_clamped() {
-        let mut app = create_test_app();
-        app.handle_event(key(KeyCode::Char('d'))).unwrap();
-        assert!(app.show_detail());
-        assert_eq!(app.detail_split_percent(), 40);
-
-        for _ in 0..20 {
-            app.handle_event(key(KeyCode::Char('>'))).unwrap();
-        }
-        assert_eq!(app.detail_split_percent(), 85);
-
-        for _ in 0..20 {
-            app.handle_event(key(KeyCode::Char('<'))).unwrap();
-        }
-        assert_eq!(app.detail_split_percent(), 15);
-    }
-
-    #[test]
     fn test_sidebar_split_adjust_clamped() {
         let mut app = create_test_app();
         app.handle_event(key(KeyCode::Char('s'))).unwrap();
@@ -4068,20 +4060,6 @@ mod tests {
             app.handle_event(key(KeyCode::Char('<'))).unwrap();
         }
         assert_eq!(app.sidebar_split_percent(), 10);
-    }
-
-    #[test]
-    fn test_split_resize_prioritizes_sidebar_over_detail() {
-        let mut app = create_test_app();
-        app.handle_event(key(KeyCode::Char('s'))).unwrap();
-        app.handle_event(key(KeyCode::Char('d'))).unwrap();
-        assert!(app.show_tree_sidebar());
-        assert!(app.show_detail());
-
-        app.handle_event(key(KeyCode::Char('>'))).unwrap();
-
-        assert_eq!(app.sidebar_split_percent(), 25);
-        assert_eq!(app.detail_split_percent(), 40);
     }
 
     #[test]

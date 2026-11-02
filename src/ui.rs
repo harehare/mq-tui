@@ -3,17 +3,19 @@ pub mod treeview;
 
 use ratatui::{
     Frame,
+    buffer::CellDiffOption,
     layout::{Alignment, Constraint, Direction, Layout, Margin, Position, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, BorderType, Borders, Clear, List, ListItem, ListState, Padding, Paragraph,
-        Scrollbar, ScrollbarOrientation, ScrollbarState, Tabs, Wrap,
+        Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
+        ScrollbarOrientation, ScrollbarState, Tabs, Wrap,
     },
 };
 
 use crate::app::{App, Mode};
 use crate::theme::Theme;
+use std::num::NonZeroU16;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// Break `line` into chunks of at most `width` display columns, preserving
@@ -123,39 +125,10 @@ pub fn draw_ui(frame: &mut Frame, app: &App) {
                     sidebar.render_with_title(frame, main_chunks[0], "Headers", &theme);
                 }
 
-                // Draw main content area (results and/or detail)
-                if app.show_detail() && !app.results().is_empty() {
-                    let left = app.detail_split_percent();
-                    let detail_chunks = Layout::default()
-                        .direction(Direction::Horizontal)
-                        .constraints([
-                            Constraint::Percentage(left),       // Results list
-                            Constraint::Percentage(100 - left), // Detail view
-                        ])
-                        .split(main_chunks[1]);
-
-                    draw_results_list(frame, app, detail_chunks[0]);
-                    draw_detail_view(frame, app, detail_chunks[1]);
-                } else {
-                    draw_results_list(frame, app, main_chunks[1]);
-                }
+                draw_results_list(frame, app, main_chunks[1]);
             } else {
                 // No sidebar - original layout
-                if app.show_detail() && !app.results().is_empty() {
-                    let left = app.detail_split_percent();
-                    let detail_chunks = Layout::default()
-                        .direction(Direction::Horizontal)
-                        .constraints([
-                            Constraint::Percentage(left),       // Results list
-                            Constraint::Percentage(100 - left), // Detail view
-                        ])
-                        .split(results_area);
-
-                    draw_results_list(frame, app, detail_chunks[0]);
-                    draw_detail_view(frame, app, detail_chunks[1]);
-                } else {
-                    draw_results_list(frame, app, results_area);
-                }
+                draw_results_list(frame, app, results_area);
             }
         }
     }
@@ -188,9 +161,11 @@ pub fn draw_ui(frame: &mut Frame, app: &App) {
 fn hint_text(mode: Mode) -> &'static str {
     match mode {
         Mode::Normal => {
-            ": query  t tree  p preview  s sidebar  d detail  y/Y copy  / search  Ctrl+K palette  ? help"
+            ": query  t tree  p preview  s sidebar  y/Y copy  / search  Ctrl+K palette  ? help"
         }
-        Mode::Query => "Enter run  Esc cancel  \u{2191}/\u{2193} history  Tab complete",
+        Mode::Query => {
+            "Enter run  Esc cancel  \u{2191}/\u{2193} select completion/history  Tab complete"
+        }
         Mode::TreeView => "j/k move  Enter/Space expand  / search  Esc exit",
         Mode::Preview => "j/k scroll  s split  </> resize  g/G top/bottom  Esc exit",
         Mode::Search => "Enter confirm  Esc cancel",
@@ -602,7 +577,7 @@ fn draw_query_input(frame: &mut Frame, app: &App, area: Rect) {
     ));
 }
 
-/// Completion suggestions popup under the query box; Tab accepts the first entry.
+/// Completion suggestions popup under the query box; scrolls with the selection.
 fn draw_completions_popup(frame: &mut Frame, app: &App, header_area: Rect) {
     let theme = app.theme();
     let completions = app.active_completions();
@@ -664,11 +639,11 @@ fn draw_completions_popup(frame: &mut Frame, app: &App, header_area: Rect) {
         })
         .collect();
 
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title("Tab/Shift+Tab to cycle"),
-    );
+    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(format!(
+        "\u{2191}/\u{2193} Tab to select ({}/{})",
+        selected + 1,
+        completions.len()
+    )));
 
     let mut state = ListState::default();
     state.select(Some(selected));
@@ -752,7 +727,8 @@ fn draw_results_list(frame: &mut Frame, app: &App, area: Rect) {
 fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
     app.set_preview_viewport_height(area.height);
 
-    let all_lines = app.preview_lines();
+    let preview = app.preview();
+    let all_lines = &preview.lines;
     let total_lines = all_lines.len();
     let inner_height = area.height.saturating_sub(2).max(1);
     let max_scroll = total_lines.saturating_sub(inner_height as usize) as u16;
@@ -779,17 +755,19 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(area);
 
-        let source_lines: Vec<Line> = app
-            .active_doc_content()
-            .lines()
-            .take(scroll as usize + inner_height as usize)
-            .map(Line::from)
-            .collect();
+        // Preview and source line counts differ, so sync scroll by proportion.
+        let source_lines: Vec<Line> = app.active_doc_content().lines().map(Line::from).collect();
+        let source_max = source_lines.len().saturating_sub(inner_height as usize);
+        let source_scroll = if max_scroll == 0 {
+            0
+        } else {
+            (scroll as usize * source_max / max_scroll as usize) as u16
+        };
         let source_block = Block::default().title("Source").borders(Borders::ALL);
         let source_paragraph = Paragraph::new(source_lines)
             .block(source_block)
             .wrap(Wrap { trim: false })
-            .scroll((scroll, 0));
+            .scroll((source_scroll, 0));
         frame.render_widget(source_paragraph, chunks[0]);
 
         chunks[1]
@@ -801,12 +779,14 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
 
     // Each line wraps to at least one row, so lines past this can't be on screen.
     let visible_end = (scroll as usize + inner_height as usize).min(total_lines);
+    let inner = block.inner(preview_area);
     let paragraph = Paragraph::new(all_lines[..visible_end].to_vec())
         .block(block)
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
 
     frame.render_widget(paragraph, preview_area);
+    draw_scaled_headings(frame, &preview, inner, scroll as usize, visible_end);
 
     if total_lines > inner_height as usize {
         let mut scrollbar_state = ScrollbarState::new(total_lines).position(scroll as usize);
@@ -820,6 +800,82 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
             }),
             &mut scrollbar_state,
         );
+    }
+}
+
+/// Overlay enlarged headings (kitty text sizing) onto their placeholder lines.
+/// Headings only partly on screen are left blank, as the terminal can't clip them.
+fn draw_scaled_headings(
+    frame: &mut Frame,
+    preview: &preview::Preview,
+    inner: Rect,
+    scroll: usize,
+    limit: usize,
+) {
+    let (mut row, mut next_line) = (0usize, 0usize);
+    for heading in &preview.scaled {
+        if heading.line >= limit || row >= scroll + inner.height as usize {
+            break;
+        }
+        for line in &preview.lines[next_line..heading.line] {
+            row += Paragraph::new(line.clone())
+                .wrap(Wrap { trim: false })
+                .line_count(inner.width)
+                .max(1);
+        }
+        next_line = heading.line;
+        let rows = heading.scale as usize;
+        if row < scroll || row + rows > scroll + inner.height as usize {
+            continue;
+        }
+        draw_scaled_heading(
+            frame.buffer_mut(),
+            heading,
+            inner.x,
+            inner.y + (row - scroll) as u16,
+            inner.width,
+        );
+    }
+}
+
+fn draw_scaled_heading(
+    buf: &mut ratatui::buffer::Buffer,
+    heading: &preview::ScaledHeading,
+    x: u16,
+    y: u16,
+    max_width: u16,
+) {
+    if heading.text.is_empty() {
+        return;
+    }
+    let style = heading.style.remove_modifier(Modifier::UNDERLINED);
+    let text_width = UnicodeWidthStr::width(heading.text.as_str()) as u32;
+    let mut scale = heading.scale as u32;
+    while scale > 1 && text_width * scale > max_width as u32 {
+        scale -= 1;
+    }
+    if scale <= 1 {
+        buf.set_stringn(x, y, &heading.text, max_width as usize, style);
+        return;
+    }
+
+    let width = (text_width * scale) as u16;
+    // The escape sequence's string width is meaningless, so force the real width
+    // and skip every other cell the block covers.
+    let cell = &mut buf[(x, y)];
+    cell.set_symbol(&format!("\x1b]66;s={scale};{}\x1b\\", heading.text))
+        .set_style(style)
+        .set_diff_option(CellDiffOption::ForcedWidth(
+            NonZeroU16::new(width).expect("text is non-empty"),
+        ));
+    for dy in 0..scale as u16 {
+        for dx in 0..width {
+            if (dx, dy) != (0, 0) {
+                buf[(x + dx, y + dy)]
+                    .set_symbol(" ")
+                    .set_diff_option(CellDiffOption::Skip);
+            }
+        }
     }
 }
 
@@ -955,78 +1011,6 @@ fn draw_title_bar(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(title_text, area);
 }
 
-fn draw_detail_view(frame: &mut Frame, app: &App, area: Rect) {
-    let results = app.results();
-    if results.is_empty() || app.selected_idx() >= results.len() {
-        return;
-    }
-
-    let selected_item = &results[app.selected_idx()];
-    let title = format!(
-        "Detail View - {}/{} \u{203a} {}",
-        app.selected_idx() + 1,
-        results.len(),
-        node_type_label(selected_item)
-    );
-    let detail_block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_type(BorderType::Plain)
-        .padding(Padding::new(1, 1, 1, 1));
-
-    let detailed_content = format!("{:#?}", selected_item);
-
-    let detail_text = Paragraph::new(detailed_content)
-        .style(Style::default())
-        .block(detail_block)
-        .wrap(Wrap { trim: false });
-
-    frame.render_widget(detail_text, area);
-}
-
-/// Short variant name for a node, used in the detail view's breadcrumb title.
-fn node_type_label(node: &mq_markdown::Node) -> &'static str {
-    use mq_markdown::Node;
-    match node {
-        Node::Heading(_) => "Heading",
-        Node::List(_) => "List",
-        Node::Code(_) => "Code Block",
-        Node::CodeInline(_) => "Inline Code",
-        Node::Blockquote(_) => "Blockquote",
-        Node::Strong(_) => "Strong",
-        Node::Emphasis(_) => "Emphasis",
-        Node::Delete(_) => "Strikethrough",
-        Node::Link(_) => "Link",
-        Node::LinkRef(_) => "Link Ref",
-        Node::Image(_) => "Image",
-        Node::ImageRef(_) => "Image Ref",
-        Node::Text(_) => "Text",
-        Node::HorizontalRule(_) => "Horizontal Rule",
-        Node::TableAlign(_) => "Table Header",
-        Node::TableRow(_) => "Table Row",
-        Node::TableCell(_) => "Table Cell",
-        Node::Break(_) => "Line Break",
-        Node::Html(_) => "HTML",
-        Node::Math(_) => "Math",
-        Node::MathInline(_) => "Inline Math",
-        Node::Yaml(_) => "YAML",
-        Node::Toml(_) => "TOML",
-        Node::Fragment(_) => "Fragment",
-        Node::Footnote(_) => "Footnote",
-        Node::FootnoteRef(_) => "Footnote Ref",
-        Node::Definition(_) => "Definition",
-        Node::MdxFlowExpression(_) => "MDX Flow Expression",
-        Node::MdxJsxFlowElement(_) => "MDX JSX Element",
-        Node::MdxJsxTextElement(_) => "MDX JSX Text",
-        Node::MdxTextExpression(_) => "MDX Text Expression",
-        Node::MdxJsEsm(_) => "MDX JS ESM",
-        Node::Empty => "Empty",
-        Node::Callout(_) => "Callout",
-        Node::Embed(_) => "Embed",
-        Node::WikiLink(_) => "WikiLink",
-    }
-}
-
 fn max_line_width(lines: &[Line]) -> u16 {
     lines
         .iter()
@@ -1103,7 +1087,7 @@ fn draw_help_screen(frame: &mut Frame, app: &App) {
         ]),
         Line::from(vec![
             Span::styled("Up/Down", Style::default().fg(Color::Yellow)),
-            Span::raw(" - Navigate query history"),
+            Span::raw(" - Select completion (or navigate query history)"),
         ]),
         Line::from(vec![
             Span::styled("Tab/Shift+Tab", Style::default().fg(Color::Yellow)),
@@ -1168,10 +1152,6 @@ fn draw_help_screen(frame: &mut Frame, app: &App) {
         )]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("d", Style::default().fg(Color::Yellow)),
-            Span::raw(" - Toggle detail view"),
-        ]),
-        Line::from(vec![
             Span::styled("y", Style::default().fg(Color::Yellow)),
             Span::raw(" - Copy result to clipboard"),
         ]),
@@ -1197,7 +1177,7 @@ fn draw_help_screen(frame: &mut Frame, app: &App) {
         ]),
         Line::from(vec![
             Span::styled("</>", Style::default().fg(Color::Yellow)),
-            Span::raw(" - Resize sidebar/detail/preview split"),
+            Span::raw(" - Resize sidebar/preview split"),
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
@@ -1651,41 +1631,37 @@ mod tests {
     }
 
     #[test]
-    fn test_draw_detail_view_empty_results() {
-        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-        let app = create_test_app();
-
-        terminal
-            .draw(|frame| {
-                let area = frame.area();
-                draw_detail_view(frame, &app, area);
-            })
-            .unwrap();
+    fn test_draw_scaled_heading_emits_osc66_and_reserves_block() {
+        use ratatui::buffer::Buffer;
+        let heading = preview::ScaledHeading {
+            line: 0,
+            scale: 2,
+            text: "Hi".into(),
+            style: Style::default(),
+        };
+        let mut buf = Buffer::empty(Rect::new(0, 0, 20, 4));
+        draw_scaled_heading(&mut buf, &heading, 1, 1, 18);
+        assert_eq!(buf[(1, 1)].symbol(), "\x1b]66;s=2;Hi\x1b\\");
+        assert_eq!(
+            buf[(1, 1)].diff_option,
+            CellDiffOption::ForcedWidth(NonZeroU16::new(4).unwrap())
+        );
+        assert_eq!(buf[(4, 2)].diff_option, CellDiffOption::Skip);
+        assert_eq!(buf[(5, 1)].diff_option, CellDiffOption::None);
     }
 
     #[test]
-    fn test_draw_detail_view_with_selection() {
-        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-        let app = create_app_with_results();
-
-        terminal
-            .draw(|frame| {
-                let area = frame.area();
-                draw_detail_view(frame, &app, area);
-            })
-            .unwrap();
-
-        let backend = terminal.backend();
-        let buffer = backend.buffer();
-
-        assert!(
-            buffer
-                .content()
-                .iter()
-                .map(|c| c.symbol())
-                .join("")
-                .contains("Detail View")
-        );
+    fn test_draw_scaled_heading_falls_back_to_plain_when_narrow() {
+        use ratatui::buffer::Buffer;
+        let heading = preview::ScaledHeading {
+            line: 0,
+            scale: 3,
+            text: "Hello".into(),
+            style: Style::default(),
+        };
+        let mut buf = Buffer::empty(Rect::new(0, 0, 8, 3));
+        draw_scaled_heading(&mut buf, &heading, 0, 0, 8);
+        assert_eq!(buf[(0, 0)].symbol(), "H");
     }
 
     #[test]
