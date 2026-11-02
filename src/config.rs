@@ -30,6 +30,8 @@ pub struct Config {
     pub show_hint_bar: bool,
     /// Color theme applied to the UI.
     pub theme: ThemeName,
+    /// Enlarge H1/H2 in the preview on terminals supporting kitty's text sizing protocol.
+    pub scale_headings: bool,
 }
 
 impl Default for Config {
@@ -37,6 +39,7 @@ impl Default for Config {
         Self {
             show_hint_bar: true,
             theme: ThemeName::default(),
+            scale_headings: true,
         }
     }
 }
@@ -84,10 +87,12 @@ mod tests {
         let config = Config {
             show_hint_bar: false,
             theme: ThemeName::Light,
+            scale_headings: false,
         };
         let content = toml::to_string_pretty(&config).unwrap();
         let parsed: Config = toml::from_str(&content).unwrap();
         assert!(!parsed.show_hint_bar);
+        assert!(!parsed.scale_headings);
         assert_eq!(parsed.theme, ThemeName::Light);
     }
 

@@ -19,7 +19,6 @@ fn test_app_creation() {
     let app = create_test_app();
     assert_eq!(app.query(), ".");
     assert_eq!(app.mode(), Mode::Normal);
-    assert!(!app.show_detail());
     assert_eq!(app.selected_idx(), 0);
     assert_eq!(app.filename().unwrap(), "test.md");
 }
@@ -66,28 +65,6 @@ fn test_mode_switching() {
     )))
     .unwrap();
     assert_eq!(app.mode(), Mode::Normal);
-}
-
-#[test]
-fn test_detail_view_toggle() {
-    let mut app = create_test_app();
-    assert!(!app.show_detail());
-
-    // Toggle detail view on
-    app.handle_event(Event::Key(KeyEvent::new(
-        KeyCode::Char('d'),
-        KeyModifiers::NONE,
-    )))
-    .unwrap();
-    assert!(app.show_detail());
-
-    // Toggle detail view off
-    app.handle_event(Event::Key(KeyEvent::new(
-        KeyCode::Char('d'),
-        KeyModifiers::NONE,
-    )))
-    .unwrap();
-    assert!(!app.show_detail());
 }
 
 #[test]

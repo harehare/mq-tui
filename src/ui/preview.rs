@@ -1,8 +1,7 @@
-//! Best-effort rendering of raw Markdown source into styled `ratatui` lines,
-//! so the TUI can show something close to a rendered preview without needing
-//! a full CommonMark renderer. Operates line-by-line on the source text
-//! (preserving the user's original layout) and applies simple inline styling
-//! for emphasis, code spans, links, and images.
+//! Best-effort rich rendering of raw Markdown into styled `ratatui` lines:
+//! boxed code blocks, bordered aligned tables, underlined headings, nested
+//! bullets, callouts, and inline styling. Block-level, not a full CommonMark
+//! renderer; output line count does not match the source.
 
 use ratatui::{
     style::{Color, Modifier, Style},
@@ -13,57 +12,60 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::theme::Theme;
 
-/// Render raw Markdown `content` into a list of styled lines suitable for
-/// display in a scrollable `Paragraph`. Colors are drawn from `theme` so the
-/// preview stays readable under both the dark and light color schemes.
-pub fn render_preview(content: &str, theme: &Theme) -> Vec<Line<'static>> {
+/// A heading drawn at a larger size via kitty's text sizing protocol. Its
+/// `scale` blank placeholder lines start at `line` in `Preview::lines`.
+pub struct ScaledHeading {
+    pub line: usize,
+    pub scale: u16,
+    pub text: String,
+    pub style: Style,
+}
+
+pub struct Preview {
+    pub lines: Vec<Line<'static>>,
+    pub scaled: Vec<ScaledHeading>,
+}
+
+/// Render raw Markdown `content` for a scrollable `Paragraph`. Colors come
+/// from `theme`; with `scale_headings`, H1/H2 become `ScaledHeading` entries.
+pub fn render_preview(content: &str, theme: &Theme, scale_headings: bool) -> Preview {
     let src_lines: Vec<&str> = content.lines().collect();
     let defs = scan_link_definitions(&src_lines);
-    let mut lines = Vec::with_capacity(src_lines.len());
-    let mut in_code_block = false;
-    let mut code_fence = String::new();
+    let mut lines: Vec<Line<'static>> = Vec::with_capacity(src_lines.len());
+    let mut scaled = Vec::new();
     let mut i = 0;
 
     while i < src_lines.len() {
         let raw = src_lines[i];
         let trimmed = raw.trim_start();
 
-        if in_code_block {
-            if trimmed.starts_with(code_fence.as_str()) {
-                in_code_block = false;
-                lines.push(Line::from(Span::styled(
-                    code_fence.clone(),
-                    Style::default().fg(theme.muted),
-                )));
-            } else {
-                lines.push(Line::from(Span::styled(
-                    raw.to_string(),
-                    Style::default().fg(theme.string_lit),
-                )));
-            }
-            i += 1;
-            continue;
-        }
-
         if let Some(fence) = fence_marker(trimmed) {
-            in_code_block = true;
-            let lang = trimmed.trim_start_matches(['`', '~']).trim().to_string();
-            code_fence = fence;
-            let title = if lang.is_empty() {
-                code_fence.clone()
-            } else {
-                format!("{} {}", code_fence, lang)
-            };
-            lines.push(Line::from(Span::styled(
-                title,
-                Style::default().fg(theme.muted),
-            )));
-            i += 1;
+            let lang = trimmed.trim_start_matches(['`', '~']).trim();
+            let mut j = i + 1;
+            while j < src_lines.len() && !src_lines[j].trim_start().starts_with(fence.as_str()) {
+                j += 1;
+            }
+            lines.extend(render_code_block(lang, &src_lines[i + 1..j], theme));
+            i = j + 1;
             continue;
         }
 
         if let Some((depth, text)) = heading(trimmed) {
-            lines.push(Line::from(Span::styled(text, heading_style(depth, theme))));
+            if !lines.is_empty() && !is_blank(lines.last()) && depth <= 2 {
+                lines.push(Line::from(""));
+            }
+            if scale_headings && depth <= 2 {
+                let scale = if depth == 1 { 3 } else { 2 };
+                scaled.push(ScaledHeading {
+                    line: lines.len(),
+                    scale,
+                    text: plain_text(&text, &defs, theme),
+                    style: heading_style(depth, theme),
+                });
+                lines.extend((0..scale).map(|_| Line::from("")));
+            } else {
+                lines.extend(render_heading(depth, &text, &defs, theme));
+            }
             i += 1;
             continue;
         }
@@ -77,24 +79,18 @@ pub fn render_preview(content: &str, theme: &Theme) -> Vec<Line<'static>> {
             continue;
         }
 
-        // Invisible in real Markdown; dimmed here to keep line counts in sync.
+        // Invisible in real Markdown.
         if parse_definition_line(trimmed).is_some() {
-            lines.push(Line::from(Span::styled(
-                raw.to_string(),
-                Style::default()
-                    .fg(theme.muted)
-                    .add_modifier(Modifier::ITALIC),
-            )));
             i += 1;
             continue;
         }
 
-        // Table header + separator: render the whole block so columns align.
         if raw.contains('|')
             && src_lines
                 .get(i + 1)
                 .is_some_and(|next| is_table_separator(next))
         {
+            let aligns = parse_alignments(src_lines[i + 1]);
             let mut all_rows = vec![parse_table_cells(raw)];
             let mut j = i + 2;
             while j < src_lines.len() {
@@ -110,25 +106,29 @@ pub fn render_preview(content: &str, theme: &Theme) -> Vec<Line<'static>> {
             }
 
             let widths = table_column_widths(&all_rows, &defs, theme);
+            lines.push(render_table_border('┌', '┬', '┐', &widths, theme));
             lines.push(render_table_row(
                 &all_rows[0],
                 &widths,
+                &aligns,
                 Style::default()
                     .fg(theme.accent)
                     .add_modifier(Modifier::BOLD),
                 &defs,
                 theme,
             ));
-            lines.push(render_table_separator(&widths, theme));
+            lines.push(render_table_border('├', '┼', '┤', &widths, theme));
             for row in &all_rows[1..] {
                 lines.push(render_table_row(
                     row,
                     &widths,
+                    &aligns,
                     Style::default(),
                     &defs,
                     theme,
                 ));
             }
+            lines.push(render_table_border('└', '┴', '┘', &widths, theme));
 
             i = j;
             continue;
@@ -143,23 +143,23 @@ pub fn render_preview(content: &str, theme: &Theme) -> Vec<Line<'static>> {
             continue;
         }
 
-        if raw.contains('|') && raw.trim().starts_with('|') {
-            lines.push(Line::from(table_row_spans(
-                raw,
-                Style::default(),
-                &defs,
-                theme,
-            )));
-            i += 1;
-            continue;
-        }
-
         if let Some((level, rest)) = blockquote_prefix(raw) {
             let color = blockquote_color(level, theme);
-            let mut spans = vec![Span::styled(
-                "┃ ".repeat(level.max(1)),
-                Style::default().fg(color),
-            )];
+            let bar = Span::styled("┃ ".repeat(level.max(1)), Style::default().fg(color));
+            if let Some((label, icon, callout_color)) = callout_marker(rest, theme) {
+                lines.push(Line::from(vec![
+                    bar.clone(),
+                    Span::styled(
+                        format!("{icon} {label}"),
+                        Style::default()
+                            .fg(callout_color)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+                i += 1;
+                continue;
+            }
+            let mut spans = vec![bar];
             spans.extend(parse_inline(
                 rest,
                 Style::default().fg(color).add_modifier(Modifier::ITALIC),
@@ -174,13 +174,16 @@ pub fn render_preview(content: &str, theme: &Theme) -> Vec<Line<'static>> {
         if let Some((indent, marker, checked, rest)) = list_item(raw) {
             let mut spans = vec![Span::raw(" ".repeat(indent))];
             spans.push(Span::styled(marker, Style::default().fg(theme.accent)));
+            let mut text_style = Style::default();
             if let Some(is_checked) = checked {
-                spans.push(Span::styled(
-                    if is_checked { "☑ " } else { "☐ " },
-                    Style::default().fg(theme.selector),
-                ));
+                if is_checked {
+                    spans.push(Span::styled("☑ ", Style::default().fg(theme.success)));
+                    text_style = text_style.fg(theme.muted);
+                } else {
+                    spans.push(Span::styled("☐ ", Style::default().fg(theme.selector)));
+                }
             }
-            spans.extend(parse_inline(rest, Style::default(), &defs, theme));
+            spans.extend(parse_inline(rest, text_style, &defs, theme));
             lines.push(Line::from(spans));
             i += 1;
             continue;
@@ -201,7 +204,109 @@ pub fn render_preview(content: &str, theme: &Theme) -> Vec<Line<'static>> {
         i += 1;
     }
 
-    lines
+    Preview { lines, scaled }
+}
+
+/// Inline markup stripped, control characters removed.
+fn plain_text(text: &str, defs: &HashMap<String, String>, theme: &Theme) -> String {
+    parse_inline(text, Style::default(), defs, theme)
+        .iter()
+        .flat_map(|s| s.content.chars())
+        .filter(|c| !c.is_control())
+        .collect()
+}
+
+fn is_blank(line: Option<&Line<'_>>) -> bool {
+    line.is_none_or(|l| l.spans.iter().all(|s| s.content.trim().is_empty()))
+}
+
+fn spans_width(spans: &[Span<'_>]) -> usize {
+    spans
+        .iter()
+        .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+        .sum()
+}
+
+fn render_heading(
+    depth: usize,
+    text: &str,
+    defs: &HashMap<String, String>,
+    theme: &Theme,
+) -> Vec<Line<'static>> {
+    let style = heading_style(depth, theme);
+    let (prefix, rule) = match depth {
+        1 => ("▌ ", Some('═')),
+        2 => ("▌ ", Some('─')),
+        3 => ("▎ ", None),
+        4 => ("▸ ", None),
+        _ => ("· ", None),
+    };
+    let mut spans = vec![Span::styled(prefix, Style::default().fg(theme.accent))];
+    spans.extend(parse_inline(text, style, defs, theme));
+    let width = spans_width(&spans);
+    let mut out = vec![Line::from(spans)];
+    if let Some(ch) = rule {
+        out.push(Line::from(Span::styled(
+            ch.to_string().repeat(width.max(4)),
+            Style::default().fg(if depth == 1 {
+                theme.header
+            } else {
+                theme.muted
+            }),
+        )));
+    }
+    out
+}
+
+fn render_code_block(lang: &str, body: &[&str], theme: &Theme) -> Vec<Line<'static>> {
+    let border = Style::default().fg(theme.muted);
+    let code = Style::default().fg(theme.code_fg).bg(theme.code_bg);
+    let body: Vec<String> = body.iter().map(|l| l.replace('\t', "    ")).collect();
+    let head = if lang.is_empty() {
+        String::new()
+    } else {
+        format!("─ {lang} ")
+    };
+    let head_width = UnicodeWidthStr::width(head.as_str());
+    let content_width = body
+        .iter()
+        .map(|l| UnicodeWidthStr::width(l.as_str()))
+        .max()
+        .unwrap_or(0)
+        .max(20);
+    // Inner width: one space of padding on each side of the code.
+    let inner = (content_width + 2).max(head_width + 1);
+
+    let mut out = Vec::with_capacity(body.len() + 2);
+    out.push(Line::from(Span::styled(
+        format!("╭{head}{}╮", "─".repeat(inner - head_width)),
+        border,
+    )));
+    for line in &body {
+        let pad = inner - 1 - UnicodeWidthStr::width(line.as_str());
+        out.push(Line::from(vec![
+            Span::styled("│", border),
+            Span::styled(format!(" {line}{}", " ".repeat(pad)), code),
+            Span::styled("│", border),
+        ]));
+    }
+    out.push(Line::from(Span::styled(
+        format!("╰{}╯", "─".repeat(inner)),
+        border,
+    )));
+    out
+}
+
+/// Recognize GitHub-style alert markers such as `[!NOTE]`.
+fn callout_marker(rest: &str, theme: &Theme) -> Option<(&'static str, &'static str, Color)> {
+    match rest.trim().to_ascii_uppercase().as_str() {
+        "[!NOTE]" => Some(("Note", "ℹ", theme.function)),
+        "[!TIP]" => Some(("Tip", "💡", theme.success)),
+        "[!IMPORTANT]" => Some(("Important", "❗", theme.keyword)),
+        "[!WARNING]" => Some(("Warning", "⚠", theme.accent)),
+        "[!CAUTION]" => Some(("Caution", "🛑", Color::Red)),
+        _ => None,
+    }
 }
 
 /// Parse a `[label]: url` reference definition line, if `trimmed` is one.
@@ -281,23 +386,6 @@ fn is_table_separator(line: &str) -> bool {
     })
 }
 
-fn table_row_spans(
-    raw: &str,
-    cell_style: Style,
-    defs: &HashMap<String, String>,
-    theme: &Theme,
-) -> Vec<Span<'static>> {
-    let cells: Vec<&str> = raw.trim().trim_matches('|').split('|').collect();
-    let mut spans = Vec::new();
-    for (idx, cell) in cells.iter().enumerate() {
-        if idx > 0 {
-            spans.push(Span::styled(" │ ", Style::default().fg(theme.muted)));
-        }
-        spans.extend(parse_inline(cell.trim(), cell_style, defs, theme));
-    }
-    spans
-}
-
 fn parse_table_cells(raw: &str) -> Vec<String> {
     raw.trim()
         .trim_matches('|')
@@ -330,45 +418,81 @@ fn table_column_widths(
     widths
 }
 
+#[derive(Clone, Copy)]
+enum Align {
+    Left,
+    Center,
+    Right,
+}
+
+fn parse_alignments(separator: &str) -> Vec<Align> {
+    separator
+        .trim()
+        .trim_matches('|')
+        .split('|')
+        .map(|cell| {
+            let cell = cell.trim();
+            match (cell.starts_with(':'), cell.ends_with(':')) {
+                (true, true) => Align::Center,
+                (false, true) => Align::Right,
+                _ => Align::Left,
+            }
+        })
+        .collect()
+}
+
 fn render_table_row(
     cells: &[String],
     widths: &[usize],
+    aligns: &[Align],
     cell_style: Style,
     defs: &HashMap<String, String>,
     theme: &Theme,
 ) -> Line<'static> {
+    let border = Style::default().fg(theme.muted);
     let mut spans = Vec::new();
-    for (idx, cell) in cells.iter().enumerate() {
-        if idx > 0 {
-            spans.push(Span::styled(" │ ", Style::default().fg(theme.muted)));
+    for (idx, target) in widths.iter().enumerate() {
+        spans.push(Span::styled("│ ", border));
+        let cell_spans = cells
+            .get(idx)
+            .map(|c| parse_inline(c, cell_style, defs, theme))
+            .unwrap_or_default();
+        let free = target.saturating_sub(spans_width(&cell_spans));
+        let (left, right) = match aligns.get(idx).copied().unwrap_or(Align::Left) {
+            Align::Left => (0, free),
+            Align::Right => (free, 0),
+            Align::Center => (free / 2, free - free / 2),
+        };
+        if left > 0 {
+            spans.push(Span::raw(" ".repeat(left)));
         }
-        let cell_spans = parse_inline(cell, cell_style, defs, theme);
-        let rendered_width: usize = cell_spans
-            .iter()
-            .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
-            .sum();
         spans.extend(cell_spans);
-        let target = widths.get(idx).copied().unwrap_or(0);
-        if rendered_width < target {
-            spans.push(Span::styled(
-                " ".repeat(target - rendered_width),
-                cell_style,
-            ));
+        if right > 0 {
+            spans.push(Span::raw(" ".repeat(right)));
         }
+        spans.push(Span::raw(" "));
     }
+    spans.push(Span::styled("│", border));
     Line::from(spans)
 }
 
-fn render_table_separator(widths: &[usize], theme: &Theme) -> Line<'static> {
-    let sep_style = Style::default().fg(theme.muted);
-    let mut spans = Vec::new();
+fn render_table_border(
+    left: char,
+    mid: char,
+    right: char,
+    widths: &[usize],
+    theme: &Theme,
+) -> Line<'static> {
+    let mut text = String::new();
+    text.push(left);
     for (idx, width) in widths.iter().enumerate() {
         if idx > 0 {
-            spans.push(Span::styled("─┼─", sep_style));
+            text.push(mid);
         }
-        spans.push(Span::styled("─".repeat((*width).max(1)), sep_style));
+        text.push_str(&"─".repeat(width + 2));
     }
-    Line::from(spans)
+    text.push(right);
+    Line::from(Span::styled(text, Style::default().fg(theme.muted)))
 }
 
 fn blockquote_prefix(raw: &str) -> Option<(usize, &str)> {
@@ -402,7 +526,8 @@ fn list_item(raw: &str) -> Option<(usize, String, Option<bool>, &str)> {
         .find_map(|p| trimmed.strip_prefix(p))
     {
         let (checked, rest) = checkbox(rest);
-        return Some((indent, "• ".to_string(), checked, rest));
+        let bullet = ["• ", "◦ ", "▪ "][(indent / 2) % 3];
+        return Some((indent, bullet.to_string(), checked, rest));
     }
 
     let digits: String = trimmed.chars().take_while(|c| c.is_ascii_digit()).collect();
@@ -499,7 +624,7 @@ fn parse_inline(
         {
             flush(&mut buf, &mut spans, base);
             spans.push(Span::styled(
-                code,
+                format!(" {code} "),
                 Style::default().fg(theme.code_fg).bg(theme.code_bg),
             ));
             i += consumed;
@@ -615,7 +740,18 @@ mod tests {
     use super::*;
 
     fn render_preview(content: &str) -> Vec<Line<'static>> {
-        super::render_preview(content, &Theme::dark())
+        super::render_preview(content, &Theme::dark(), false).lines
+    }
+
+    #[test]
+    fn test_scaled_headings_reserve_placeholder_lines() {
+        let preview = super::render_preview("# A\n## B\n### C", &Theme::dark(), true);
+        assert_eq!(preview.scaled.len(), 2);
+        assert_eq!((preview.scaled[0].line, preview.scaled[0].scale), (0, 3));
+        assert_eq!((preview.scaled[1].line, preview.scaled[1].scale), (3, 2));
+        assert_eq!(preview.scaled[0].text, "A");
+        assert!(preview.lines[..5].iter().all(|l| line_text(l).is_empty()));
+        assert!(line_text(&preview.lines[5]).contains('C'));
     }
 
     fn line_text(line: &Line<'_>) -> String {
@@ -625,11 +761,13 @@ mod tests {
     #[test]
     fn test_heading_levels() {
         let lines = render_preview("# One\n## Two\n###### Six");
-        assert_eq!(line_text(&lines[0]), "One");
-        assert_eq!(line_text(&lines[1]), "Two");
-        assert_eq!(line_text(&lines[2]), "Six");
+        let texts: Vec<String> = lines.iter().map(line_text).collect();
+        assert!(texts.contains(&"▌ One".to_string()));
+        assert!(texts.contains(&"▌ Two".to_string()));
+        assert!(texts.contains(&"· Six".to_string()));
+        assert!(texts.iter().any(|t| t.starts_with('═')));
         assert!(
-            lines[0].spans[0]
+            lines[0].spans[1]
                 .style
                 .add_modifier
                 .contains(Modifier::BOLD)
@@ -663,7 +801,7 @@ mod tests {
         let code_span = lines[0]
             .spans
             .iter()
-            .find(|s| s.content.as_ref() == "cargo build")
+            .find(|s| s.content.as_ref() == " cargo build ")
             .unwrap();
         assert_eq!(code_span.style.bg, Some(Theme::dark().code_bg));
     }
@@ -703,8 +841,14 @@ mod tests {
     fn test_code_block() {
         let lines = render_preview("```rust\nfn main() {}\n```");
         assert_eq!(lines.len(), 3);
-        assert_eq!(line_text(&lines[1]), "fn main() {}");
-        assert_eq!(lines[1].spans[0].style.fg, Some(Theme::dark().string_lit));
+        assert!(line_text(&lines[0]).starts_with("╭─ rust "));
+        assert!(line_text(&lines[1]).contains("fn main() {}"));
+        assert!(line_text(&lines[2]).starts_with('╰'));
+        assert_eq!(lines[1].spans[1].style.bg, Some(Theme::dark().code_bg));
+        // Box edges line up.
+        let w = |i: usize| UnicodeWidthStr::width(line_text(&lines[i]).as_str());
+        assert_eq!(w(0), w(1));
+        assert_eq!(w(1), w(2));
     }
 
     #[test]
@@ -716,18 +860,41 @@ mod tests {
     #[test]
     fn test_table() {
         let lines = render_preview("| A | B |\n| - | - |\n| 1 | 2 |");
-        assert_eq!(line_text(&lines[0]), "A │ B");
-        assert_eq!(line_text(&lines[2]), "1 │ 2");
+        assert_eq!(lines.len(), 5);
+        assert!(line_text(&lines[0]).starts_with('┌'));
+        assert_eq!(line_text(&lines[1]), "│ A │ B │");
+        assert!(line_text(&lines[2]).starts_with('├'));
+        assert_eq!(line_text(&lines[3]), "│ 1 │ 2 │");
+        assert!(line_text(&lines[4]).starts_with('└'));
     }
 
     #[test]
     fn test_table_columns_align_by_rendered_width() {
         let lines =
             render_preview("| Name | Note |\n| - | - |\n| **bold** | x |\n| a | much longer |");
-        // Row 1 is the separator (uses '┼', not '│'); compare the data rows.
-        let col_pos = |idx: usize| line_text(&lines[idx]).find('│').unwrap();
-        assert_eq!(col_pos(0), col_pos(2));
-        assert_eq!(col_pos(0), col_pos(3));
+        let widths: Vec<usize> = lines
+            .iter()
+            .map(|l| UnicodeWidthStr::width(line_text(l).as_str()))
+            .collect();
+        assert!(widths.iter().all(|w| *w == widths[0]));
+    }
+
+    #[test]
+    fn test_table_alignment() {
+        let lines = render_preview("| A |\n| --: |\n| 1 |\n| long |");
+        assert_eq!(line_text(&lines[3]), "│    1 │");
+    }
+
+    #[test]
+    fn test_callout() {
+        let lines = render_preview("> [!NOTE]\n> body");
+        assert_eq!(line_text(&lines[0]), "┃ ℹ Note");
+    }
+
+    #[test]
+    fn test_nested_list_uses_different_bullet() {
+        let lines = render_preview("- a\n  - b");
+        assert_eq!(line_text(&lines[1]), "  ◦ b");
     }
 
     #[test]
@@ -781,16 +948,8 @@ mod tests {
     }
 
     #[test]
-    fn test_definition_line_rendered_dimmed_and_preserves_line_count() {
+    fn test_definition_line_is_hidden() {
         let lines = render_preview("a\n[ref]: https://example.com\nb");
-        assert_eq!(lines.len(), 3);
-        assert!(line_text(&lines[1]).contains("https://example.com"));
-    }
-
-    #[test]
-    fn test_preview_line_count_matches_source_line_count() {
-        let content = "# Title\n\nSome *text* with a [link](url).\n\n- item\n\n> quote\n";
-        let lines = render_preview(content);
-        assert_eq!(lines.len(), content.lines().count());
+        assert_eq!(lines.len(), 2);
     }
 }
